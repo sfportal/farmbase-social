@@ -1,0 +1,30 @@
+{
+  // Cloudflare Worker "farmbase-social": giao diện PWA trong public/, API trong src/index.js, CSDL D1 "farmbase-social".
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "farmbase-social",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "farmbase-social",
+      // Thay bằng id thật sau khi tạo D1 (xem docs/CAI-DAT.md)
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "FB_APP_ID": "1693553165520150",
+    "FB_API_VERSION": "v27.0"
+  },
+  // Biến bí mật đặt trên Cloudflare, không có trong repo: ADMIN_EMAIL, ADMIN_INITIAL_PASSWORD, TOKEN_KEY, FB_APP_SECRET
+  // (repo này công khai, nên email và mật khẩu không được ghi ở đây)
+  "keep_vars": true,
+  "observability": { "enabled": true }
+}
