@@ -16,7 +16,7 @@ const DEFAULT_SCOPES = [
 ].join(',');
 
 // FB_GRAPH_BASE chỉ dùng khi chạy thử trên máy (máy chủ Facebook giả), không đặt trên Cloudflare.
-const graphBase = (env) => `${env.FB_GRAPH_BASE || 'https://graph.facebook.com'}/${env.FB_API_VERSION || 'v27.0'}`;
+export const graphBase = (env) => `${env.FB_GRAPH_BASE || 'https://graph.facebook.com'}/${env.FB_API_VERSION || 'v27.0'}`;
 const redirectUri = (request) => `${new URL(request.url).origin}/api/fb/callback`;
 
 export async function graph(env, path, params = {}, init = {}) {

@@ -14,11 +14,27 @@ const fakePost = (pageId, i) => ({
   permalink_url: `https://www.facebook.com/${pageId}/posts/${i}`, status_type: 'added_photos',
   reactions: { data: [], summary: { total_count: 10 * i } }, comments: { data: [], summary: { total_count: i } }, shares: { count: i % 2 },
 });
-const fakeGraph = createServer((req, res) => {
+const graphWrites = [];
+let fbSeq = 0;
+const fakeGraph = createServer(async (req, res) => {
   const u = new URL(req.url, 'http://x');
   graphHits.push(u.pathname + '?' + u.searchParams.toString());
-  const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
   res.setHeader('content-type', 'application/json');
+  if (req.method !== 'GET') {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    const params = Object.fromEntries(new URLSearchParams(req.method === 'DELETE' ? u.search : raw));
+    const w = u.pathname.match(/^\/v[\d.]+\/(.+?)(?:\/(feed|photos))?$/);
+    const pageId = w[1];
+    const token = params.access_token;
+    delete params.access_token;
+    graphWrites.push({ method: req.method, path: u.pathname, params, token });
+    if (req.method === 'DELETE') return res.end('{"success":true}');
+    if (token !== `ma-trang-${pageId}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
+    fbSeq++;
+    return res.end(JSON.stringify(w[2] === 'photos' ? { id: `photo${fbSeq}`, post_id: `${pageId}_p${fbSeq}` } : { id: `${pageId}_f${fbSeq}` }));
+  }
+  const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
   if (!m) { res.statusCode = 404; return res.end('{"error":{"message":"không có","code":100}}'); }
   if (u.searchParams.get('access_token') !== `ma-trang-${m[1]}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
   const page2 = u.searchParams.get('after') === 'trang2';
@@ -36,7 +52,7 @@ function sql(command) {
 }
 
 // Làm sạch D1 cục bộ và thêm 2 Fanpage giả để thử phân quyền.
-sql("DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
+sql("DELETE FROM social_content; DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
 const KEY = 'khoa-thu-nghiem-chi-dung-tren-may';
 const encA = await encryptSecret('ma-trang-111', KEY);
 const encB = await encryptSecret('ma-trang-222', KEY);
@@ -198,7 +214,68 @@ for (const f of ['chinh-sach-quyen-rieng-tu', 'dieu-khoan', 'xoa-du-lieu']) {
 }
 step('trang chính sách, điều khoản, xóa dữ liệu công khai, có tiếng Anh');
 
-// 10. Giao diện trên máy tính và điện thoại
+// 10. Lịch đăng: soạn, gửi duyệt, duyệt, hẹn giờ, hủy lịch, từ chối, lỗi đăng (chỉ gọi Facebook giả)
+const nowS = () => Math.floor(Date.now() / 1000);
+// viewer = Biên tập, được giao Trang 222
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: 'Bài nháp của biên tập', action: 'submit' } });
+assert.equal(r.status, 201, JSON.stringify(r.data));
+const pendingId = r.data.items[0].id;
+assert.equal(r.data.items[0].status, 'pending');
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['111'], message: 'x' } });
+assert.equal(r.status, 400, 'không soạn cho Trang không được giao');
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: 'x', action: 'publish' } });
+assert.equal(r.status, 403, 'biên tập không tự đăng được');
+r = await viewer.req(`/api/content/${pendingId}/approve`, { method: 'POST' });
+assert.equal(r.status, 403, 'biên tập không duyệt được');
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: 'x', scheduled_at: nowS() + 40 * 86400 } });
+assert.equal(r.status, 400, 'hẹn giờ quá 30 ngày');
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: '', link: 'javascript:alert(1)' } });
+assert.equal(r.status, 400, 'liên kết phải là http(s)');
+// Chủ hệ thống từ chối, biên tập sửa và gửi lại, Chủ hệ thống duyệt đăng ngay
+r = await owner.req(`/api/content/${pendingId}/reject`, { method: 'POST', body: { reason: 'Thiếu ảnh' } });
+assert.equal(r.data.item.status, 'rejected');
+r = await viewer.req(`/api/content/${pendingId}`, { method: 'PATCH', body: { message: 'Bài đã sửa', image_url: 'https://example.com/a.jpg' } });
+assert.equal(r.data.item.status, 'draft');
+r = await viewer.req(`/api/content/${pendingId}/submit`, { method: 'POST' });
+assert.equal(r.data.item.status, 'pending');
+graphWrites.length = 0;
+r = await owner.req(`/api/content/${pendingId}/approve`, { method: 'POST' });
+assert.equal(r.data.item.status, 'published', JSON.stringify(r.data));
+assert.match(r.data.item.fb_post_id, /^222_p/);
+assert.equal(graphWrites[0].path, '/v27.0/222/photos');
+assert.equal(graphWrites[0].params.url, 'https://example.com/a.jpg');
+assert.equal(graphWrites[0].params.caption, 'Bài đã sửa');
+assert.equal(graphWrites[0].params.published, undefined, 'đăng ngay không gửi published=false');
+r = await viewer.req(`/api/content/${pendingId}`, { method: 'PATCH', body: { message: 'sửa sau khi đăng' } });
+assert.equal(r.status, 409, 'bài đã đăng không sửa được');
+// Hẹn giờ trên 2 Trang một lần, rồi hủy lịch một bài
+const at = nowS() + 3 * 3600;
+graphWrites.length = 0;
+r = await owner.req('/api/content', { method: 'POST', body: { page_ids: ['111', '222'], message: 'Thông báo hội thảo', link: 'https://farmbase.vn/', scheduled_at: at, action: 'publish' } });
+assert.deepEqual(r.data.items.map((i) => i.status), ['scheduled', 'scheduled']);
+assert.equal(graphWrites.length, 2);
+assert.deepEqual([graphWrites[0].params.published, graphWrites[0].params.scheduled_publish_time, graphWrites[0].params.link], ['false', String(at), 'https://farmbase.vn/']);
+const schedId = r.data.items[0].id;
+graphWrites.length = 0;
+r = await owner.req(`/api/content/${schedId}/cancel`, { method: 'POST' });
+assert.equal(r.data.item.status, 'draft');
+assert.equal(graphWrites[0].method, 'DELETE');
+// Mã Trang hỏng: bài chuyển sang lỗi, có lý do
+const badEnc = await encryptSecret('ma-sai', KEY);
+sql(`INSERT INTO social_pages (id, name, status, access_token_enc, connected_at, updated_at) VALUES ('333','Fanpage Lỗi','active','${badEnc}',0,0);`);
+r = await owner.req('/api/content', { method: 'POST', body: { page_ids: ['333'], message: 'Thử lỗi', action: 'publish' } });
+assert.equal(r.data.items[0].status, 'failed');
+assert.match(r.data.items[0].last_error, /không hợp lệ/);
+// Danh sách và quyền xem
+r = await owner.req('/api/content');
+assert.ok(r.data.counts.published >= 1 && r.data.counts.scheduled === 1 && r.data.counts.failed === 1 && r.data.counts.draft === 1, JSON.stringify(r.data.counts));
+r = await viewer.req('/api/content');
+assert.ok(r.data.items.every((i) => i.page_id === '222'), 'biên tập chỉ thấy bài của Trang được giao');
+r = await owner.req('/api/audit');
+assert.ok(['post_published', 'post_scheduled', 'post_cancelled', 'post_rejected', 'post_publish_failed'].every((a) => r.data.entries.some((e) => e.action === a)));
+step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, hẹn giờ nhiều Trang, hủy lịch, báo lỗi, đúng quyền');
+
+// 11. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 mkdirSync('test-output', { recursive: true });
@@ -208,7 +285,8 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(`${label}: ${e.message}`));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(`${label}: ${m.text()}`); });
+  // Ảnh thử trỏ ra ngoài (example.com) không tải được trong môi trường kiểm thử: bỏ qua lỗi tải ảnh đó.
+  page.on('console', (m) => { if (m.type() === 'error' && !/ERR_TUNNEL_CONNECTION_FAILED|ERR_NAME_NOT_RESOLVED/.test(m.text())) errors.push(`${label}: ${m.text()}`); });
   await page.goto(BASE + '/');
   await page.waitForSelector('#email');
   await page.screenshot({ path: `test-output/${label}-dang-nhap.png`, fullPage: true });
@@ -216,9 +294,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'lich-dang', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(route === 'bai-dang' ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
@@ -234,6 +312,13 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.click('#more');
   await page.waitForFunction(() => document.querySelectorAll('.post').length === 5);
   await page.screenshot({ path: `test-output/${label}-bai-dang-mot-trang.png`, fullPage: true });
+  await page.goto(`${BASE}/#/lich-dang`);
+  await page.waitForSelector('#new');
+  await page.waitForSelector('.chip');
+  await page.click('#new');
+  await page.waitForSelector('#cf');
+  await page.screenshot({ path: `test-output/${label}-soan-bai.png` });
+  await page.keyboard.press('Escape');
   await page.goto(`${BASE}/#/nhan-vien`);
   await page.click('#add');
   await page.waitForSelector('.modal');
