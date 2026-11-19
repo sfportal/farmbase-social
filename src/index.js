@@ -5,6 +5,7 @@ import * as auth from './routes/auth.js';
 import * as users from './routes/users.js';
 import * as fb from './routes/facebook.js';
 import * as posts from './routes/posts.js';
+import * as content from './routes/content.js';
 
 // [method, mẫu đường dẫn, hàm, tùy chọn]
 // public: không cần đăng nhập · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
@@ -26,6 +27,14 @@ const ROUTES = [
   ['GET', '/api/posts', posts.allPosts],
   ['POST', '/api/pages/:id/refresh', fb.refreshPage],
   ['POST', '/api/pages/:id/disconnect', fb.disconnectPage],
+  ['GET', '/api/content', content.listContent],
+  ['POST', '/api/content', content.createContent],
+  ['PATCH', '/api/content/:id', content.updateContent],
+  ['DELETE', '/api/content/:id', content.deleteContent],
+  ['POST', '/api/content/:id/submit', content.submitContent],
+  ['POST', '/api/content/:id/approve', content.approveContent],
+  ['POST', '/api/content/:id/reject', content.rejectContent],
+  ['POST', '/api/content/:id/cancel', content.cancelContent],
   ['GET', '/api/fb/status', fb.fbStatus],
   ['GET', '/api/fb/connect', fb.fbConnect, { nav: true }],
   ['GET', '/api/fb/callback', fb.fbCallback, { nav: true }],
