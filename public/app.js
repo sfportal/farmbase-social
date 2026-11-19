@@ -142,6 +142,7 @@ function viewLogin() {
     <div id="msg"></div>
     <button class="btn block" style="margin-top:18px">Đăng nhập</button>
     <p class="muted small" style="margin-bottom:0">Quên mật khẩu? Vui lòng liên hệ Chủ hệ thống để được cấp mật khẩu tạm.</p>
+    <p class="muted small" style="margin-bottom:0"><a href="/chinh-sach-quyen-rieng-tu.html">Quyền riêng tư</a> · <a href="/dieu-khoan.html">Điều khoản</a> · <a href="/xoa-du-lieu.html">Xóa dữ liệu</a></p>
   </form></div>`;
   const f = document.getElementById('f');
   f.email.focus();
