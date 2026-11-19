@@ -12,11 +12,12 @@ Chạy trên Cloudflare Workers + D1 (gói miễn phí; dùng chung D1 `farmbase
 | Giai đoạn | Nội dung | Trạng thái |
 | --- | --- | --- |
 | 1 | Đăng nhập, vai trò, đổi mật khẩu lần đầu, khóa khi nhập sai, quản lý nhân viên, giao Fanpage, kết nối Fanpage bằng đăng nhập Facebook, nhật ký | Xong |
-| 2 | Lịch nội dung, duyệt, đăng bài tự động, số liệu từng bài | Chưa làm |
+| 2 | Xem bài đăng và số tương tác từng bài theo Fanpage | Xong |
+| 2 | Lịch nội dung, duyệt, đăng bài tự động | Chưa làm |
 | 3 | Webhook, hộp thư chung, trả lời bình luận và tin nhắn tự động, AI | Chưa làm |
 | 4 | CRM mini, ghi đơn, kho kiến thức AI, báo cáo tuần | Chưa làm |
 
-## API (giai đoạn 1)
+## API
 
 | Phương thức | Đường dẫn | Quyền |
 | --- | --- | --- |
@@ -31,6 +32,8 @@ Chạy trên Cloudflare Workers + D1 (gói miễn phí; dùng chung D1 `farmbase
 | POST | `/api/users/:id/reset-password`, `/api/users/:id/unlock` | Chủ hệ thống |
 | GET | `/api/audit` | Chủ hệ thống |
 | GET | `/api/pages` | Đã đăng nhập (chỉ Fanpage được giao) |
+| GET | `/api/pages/:id/posts?after=&limit=` | Đã đăng nhập (Fanpage được giao): bài đăng kèm số cảm xúc, bình luận, chia sẻ |
+| GET | `/api/posts?limit=` | Đã đăng nhập: bài mới nhất của mọi Fanpage được giao, gộp theo thời gian |
 | POST | `/api/pages/:id/refresh` | Chủ hệ thống, Quản lý |
 | POST | `/api/pages/:id/disconnect` | Chủ hệ thống |
 | GET | `/api/fb/status`, `/api/fb/connect`, `/api/fb/callback` | Chủ hệ thống |
