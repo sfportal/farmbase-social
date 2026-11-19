@@ -1,6 +1,6 @@
 -- Giai đoạn 1: tài khoản, phiên đăng nhập, Fanpage, phân quyền theo Fanpage, nhật ký.
 
-CREATE TABLE users (
+CREATE TABLE social_users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE COLLATE NOCASE,
   name TEXT NOT NULL DEFAULT '',
@@ -15,17 +15,17 @@ CREATE TABLE users (
   updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE sessions (
+CREATE TABLE social_sessions (
   id TEXT PRIMARY KEY,              -- SHA-256 của mã phiên, không lưu mã gốc
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES social_users(id) ON DELETE CASCADE,
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   user_agent TEXT,
   ip TEXT
 );
-CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX social_idx_sessions_user ON social_sessions(user_id);
 
-CREATE TABLE pages (
+CREATE TABLE social_pages (
   id TEXT PRIMARY KEY,              -- id Fanpage trên Facebook
   name TEXT NOT NULL,
   category TEXT,
@@ -36,24 +36,24 @@ CREATE TABLE pages (
   followers_count INTEGER,
   stats_at INTEGER,
   last_error TEXT,
-  connected_by INTEGER REFERENCES users(id),
+  connected_by INTEGER REFERENCES social_users(id),
   connected_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
-CREATE TABLE user_pages (
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+CREATE TABLE social_user_pages (
+  user_id INTEGER NOT NULL REFERENCES social_users(id) ON DELETE CASCADE,
+  page_id TEXT NOT NULL REFERENCES social_pages(id) ON DELETE CASCADE,
   PRIMARY KEY (user_id, page_id)
 );
 
-CREATE TABLE oauth_states (
+CREATE TABLE social_oauth_states (
   state TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL,
   created_at INTEGER NOT NULL
 );
 
-CREATE TABLE audit_log (
+CREATE TABLE social_audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
   action TEXT NOT NULL,
@@ -62,4 +62,4 @@ CREATE TABLE audit_log (
   ip TEXT,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX idx_audit_created ON audit_log(created_at DESC);
+CREATE INDEX social_idx_audit_created ON social_audit_log(created_at DESC);

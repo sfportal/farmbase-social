@@ -10,7 +10,7 @@
     "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
-    { "binding": "DB", "database_name": "farmbase-social-test", "database_id": "local-test", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "farmbase-social-test", "database_id": "local-test", "migrations_dir": "migrations", "migrations_table": "social_migrations" }
   ],
   "vars": {
     "ADMIN_EMAIL": "admin@example.test",

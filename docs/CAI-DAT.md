@@ -2,12 +2,11 @@
 
 Hướng dẫn cho người không viết code. Làm một lần, sau đó mỗi lần cập nhật nhánh `main` là trang tự triển khai.
 
-## 1. Tạo cơ sở dữ liệu D1
+## 1. Cơ sở dữ liệu D1
 
-1. Vào Cloudflare → **Storage & Databases → D1 → Create**, đặt tên `farmbase-social`.
-2. Chép **Database ID** và thay vào `database_id` trong `wrangler.jsonc` (Claude làm giúp được, ID không phải thông tin bí mật).
+Không cần tạo mới. Hệ thống dùng chung D1 `farmbase` của website farmbase.vn (gói Cloudflare miễn phí chỉ cho tối đa 10 D1). Mọi bảng của FarmBase Social có tiền tố `social_`, không đụng bảng của website.
 
-Lưu ý: gói Cloudflare miễn phí chỉ cho tối đa 10 cơ sở dữ liệu D1. Nếu đã đủ 10, cần nâng gói Workers Paid (5 USD/tháng) hoặc xóa một cơ sở dữ liệu không dùng.
+Khi nâng gói Workers Paid sau này, có thể chuyển sang D1 riêng.
 
 ## 2. Tạo Worker và nối GitHub
 

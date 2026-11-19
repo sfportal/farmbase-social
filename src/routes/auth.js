@@ -18,7 +18,7 @@ export async function login(request, env) {
   if (!email || !password) throw new HttpError(400, 'Vui lòng nhập email và mật khẩu', 'missing');
 
   await ensureBootstrapAdmin(env);
-  const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first();
+  const user = await env.DB.prepare('SELECT * FROM social_users WHERE email = ?').bind(email).first();
   const t = now();
 
   if (!user) {
@@ -38,17 +38,17 @@ export async function login(request, env) {
   if (!(await verifyPassword(password, user.password_hash))) {
     const fails = user.failed_attempts + 1;
     if (fails >= MAX_FAILED) {
-      await env.DB.prepare('UPDATE users SET failed_attempts = 0, locked_until = ?, updated_at = ? WHERE id = ?')
+      await env.DB.prepare('UPDATE social_users SET failed_attempts = 0, locked_until = ?, updated_at = ? WHERE id = ?')
         .bind(t + LOCK_SECONDS, t, user.id).run();
       await audit(env, request, user.id, 'account_locked', user.email);
       throw new HttpError(429, `Tài khoản tạm khóa ${LOCK_SECONDS / 60} phút do nhập sai ${MAX_FAILED} lần.`, 'locked');
     }
-    await env.DB.prepare('UPDATE users SET failed_attempts = ?, updated_at = ? WHERE id = ?').bind(fails, t, user.id).run();
+    await env.DB.prepare('UPDATE social_users SET failed_attempts = ?, updated_at = ? WHERE id = ?').bind(fails, t, user.id).run();
     await audit(env, request, user.id, 'login_failed', user.email, { reason: 'bad_password' });
     throw new HttpError(401, `Email hoặc mật khẩu không đúng (còn ${MAX_FAILED - fails} lần thử)`, 'bad_credentials');
   }
 
-  await env.DB.prepare('UPDATE users SET failed_attempts = 0, locked_until = 0, last_login_at = ?, updated_at = ? WHERE id = ?')
+  await env.DB.prepare('UPDATE social_users SET failed_attempts = 0, locked_until = 0, last_login_at = ?, updated_at = ? WHERE id = ?')
     .bind(t, t, user.id).run();
   const cookie = await createSession(env, request, user.id);
   await audit(env, request, user.id, 'login', user.email);
@@ -62,7 +62,7 @@ export async function logout(request, env, user) {
 }
 
 export async function logoutAll(request, env, user) {
-  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id).run();
+  await env.DB.prepare('DELETE FROM social_sessions WHERE user_id = ?').bind(user.id).run();
   await audit(env, request, user.id, 'logout_all', user.email);
   return json({ ok: true }, 200, { 'set-cookie': sessionCookie(request, '', 0) });
 }
@@ -77,7 +77,7 @@ export async function changePassword(request, env, user) {
   const body = await readJson(request);
   const current = String(body.current_password || '');
   const next = String(body.new_password || '');
-  const row = await env.DB.prepare('SELECT password_hash FROM users WHERE id = ?').bind(user.id).first();
+  const row = await env.DB.prepare('SELECT password_hash FROM social_users WHERE id = ?').bind(user.id).first();
   if (!(await verifyPassword(current, row.password_hash))) {
     throw new HttpError(400, 'Mật khẩu hiện tại không đúng', 'bad_current');
   }
@@ -86,11 +86,11 @@ export async function changePassword(request, env, user) {
   if (next === current) throw new HttpError(400, 'Mật khẩu mới phải khác mật khẩu hiện tại', 'same_password');
 
   const t = now();
-  await env.DB.prepare('UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
+  await env.DB.prepare('UPDATE social_users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
     .bind(await hashPassword(next), t, user.id).run();
   // Đăng xuất các thiết bị khác, giữ phiên hiện tại.
   const token = getCookie(request, COOKIE);
-  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').bind(user.id, await sha256(token)).run();
+  await env.DB.prepare('DELETE FROM social_sessions WHERE user_id = ? AND id != ?').bind(user.id, await sha256(token)).run();
   await audit(env, request, user.id, 'password_changed', user.email);
   return json({ ok: true, user: publicUser({ ...user, must_change_password: 0 }) });
 }

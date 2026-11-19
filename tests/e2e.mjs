@@ -14,8 +14,8 @@ function sql(command) {
 }
 
 // Làm sạch D1 cục bộ và thêm 2 Fanpage giả để thử phân quyền.
-sql("DELETE FROM sessions; DELETE FROM user_pages; DELETE FROM oauth_states; DELETE FROM audit_log; DELETE FROM pages; DELETE FROM users;");
-sql("INSERT INTO pages (id, name, status, fan_count, followers_count, connected_at, updated_at) VALUES ('111','Fanpage Thử A','active',120,150,0,0), ('222','Fanpage Thử B','active',30,45,0,0);");
+sql("DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
+sql("INSERT INTO social_pages (id, name, status, fan_count, followers_count, connected_at, updated_at) VALUES ('111','Fanpage Thử A','active',120,150,0,0), ('222','Fanpage Thử B','active',30,45,0,0);");
 
 class Client {
   constructor() { this.cookie = ''; }

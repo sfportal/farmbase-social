@@ -17,14 +17,14 @@ export const ROLE_LABELS = {
 
 // Lần đầu hệ thống chạy (chưa có tài khoản nào): tạo Chủ hệ thống từ biến bí mật.
 export async function ensureBootstrapAdmin(env) {
-  const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first();
+  const row = await env.DB.prepare('SELECT COUNT(*) AS n FROM social_users').first();
   if (row.n > 0) return;
   const email = (env.ADMIN_EMAIL || '').trim().toLowerCase();
   const password = env.ADMIN_INITIAL_PASSWORD || '';
   if (!email || !password) return;
   const t = now();
   await env.DB.prepare(
-    `INSERT OR IGNORE INTO users (email, name, role, password_hash, must_change_password, created_at, updated_at)
+    `INSERT OR IGNORE INTO social_users (email, name, role, password_hash, must_change_password, created_at, updated_at)
      VALUES (?, 'Quản trị viên', 'owner', ?, 1, ?, ?)`
   )
     .bind(email, await hashPassword(password), t, t)
@@ -34,7 +34,7 @@ export async function ensureBootstrapAdmin(env) {
 export async function createSession(env, request, userId) {
   const token = randomToken(32);
   const t = now();
-  await env.DB.prepare('INSERT INTO sessions (id, user_id, created_at, expires_at, user_agent, ip) VALUES (?,?,?,?,?,?)')
+  await env.DB.prepare('INSERT INTO social_sessions (id, user_id, created_at, expires_at, user_agent, ip) VALUES (?,?,?,?,?,?)')
     .bind(await sha256(token), userId, t, t + SESSION_DAYS * 86400, (request.headers.get('user-agent') || '').slice(0, 300), clientIp(request))
     .run();
   return sessionCookie(request, token, SESSION_DAYS * 86400);
@@ -47,7 +47,7 @@ export function sessionCookie(request, token, maxAge) {
 
 export async function destroySession(env, request) {
   const token = getCookie(request, COOKIE);
-  if (token) await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(await sha256(token)).run();
+  if (token) await env.DB.prepare('DELETE FROM social_sessions WHERE id = ?').bind(await sha256(token)).run();
 }
 
 export async function currentUser(env, request) {
@@ -55,7 +55,7 @@ export async function currentUser(env, request) {
   if (!token) return null;
   const row = await env.DB.prepare(
     `SELECT u.id, u.email, u.name, u.role, u.must_change_password, u.status, s.id AS session_id
-     FROM sessions s JOIN users u ON u.id = s.user_id
+     FROM social_sessions s JOIN social_users u ON u.id = s.user_id
      WHERE s.id = ? AND s.expires_at > ?`
   )
     .bind(await sha256(token), now())
@@ -82,11 +82,11 @@ export function requireRole(user, ...roles) {
 // Danh sách id Fanpage người dùng được xem. Chủ hệ thống thấy tất cả.
 export async function allowedPageIds(env, user) {
   if (user.role === 'owner') {
-    const { results } = await env.DB.prepare("SELECT id FROM pages WHERE status != 'disconnected'").all();
+    const { results } = await env.DB.prepare("SELECT id FROM social_pages WHERE status != 'disconnected'").all();
     return results.map((r) => r.id);
   }
   const { results } = await env.DB.prepare(
-    "SELECT up.page_id AS id FROM user_pages up JOIN pages p ON p.id = up.page_id WHERE up.user_id = ? AND p.status != 'disconnected'"
+    "SELECT up.page_id AS id FROM social_user_pages up JOIN social_pages p ON p.id = up.page_id WHERE up.user_id = ? AND p.status != 'disconnected'"
   )
     .bind(user.id)
     .all();

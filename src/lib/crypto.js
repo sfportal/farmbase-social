@@ -1,7 +1,9 @@
 // Băm mật khẩu (PBKDF2), mã ngẫu nhiên, mã hóa mã truy cập Fanpage (AES-GCM).
 
 const enc = new TextEncoder();
-const PBKDF2_ITERATIONS = 100000; // mức tối đa Workers cho phép
+// 25.000 vòng (~6 ms CPU) để vừa giới hạn 10 ms CPU của gói Workers miễn phí.
+// Mật khẩu cũ lưu kèm số vòng, nên nâng số này sau (gói trả phí) vẫn đăng nhập được bình thường.
+const PBKDF2_ITERATIONS = 25000;
 
 export function b64u(bytes) {
   let s = '';

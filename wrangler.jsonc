@@ -13,10 +13,10 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "farmbase-social",
-      // Thay bằng id thật sau khi tạo D1 (xem docs/CAI-DAT.md)
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
+      // Dùng chung D1 "farmbase" với website (gói miễn phí giới hạn 10 D1); mọi bảng có tiền tố social_
+      "database_name": "farmbase",
+      "database_id": "708142ad-4dfe-46b7-ae7d-b3a0c35f15f5",
+      "migrations_dir": "migrations", "migrations_table": "social_migrations"
     }
   ],
   "vars": {

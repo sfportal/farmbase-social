@@ -2,7 +2,7 @@
 
 Trang quản trị nội bộ để quản lý nhiều Fanpage Facebook: tài khoản nhân viên, phân quyền theo Fanpage, kết nối Fanpage, và (các giai đoạn sau) lịch đăng bài, hộp thư chung, trả lời tự động, CRM mini.
 
-Chạy trên Cloudflare Workers + D1. Giao diện là PWA, dùng trên máy tính và cài được lên điện thoại.
+Chạy trên Cloudflare Workers + D1 (gói miễn phí; dùng chung D1 `farmbase` của website, bảng có tiền tố `social_`). Giao diện là PWA, dùng trên máy tính và cài được lên điện thoại.
 
 - Cài đặt trên Cloudflare: [docs/CAI-DAT.md](docs/CAI-DAT.md)
 - Hướng dẫn cho người làm tiếp (người hoặc Claude): [CLAUDE.md](CLAUDE.md)

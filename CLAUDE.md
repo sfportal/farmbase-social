@@ -8,7 +8,8 @@
 
 ## Kiến trúc
 - Cloudflare Worker `farmbase-social` (`wrangler.jsonc`), mã trong `src/`, giao diện tĩnh trong `public/` (Assets, chế độ SPA). Worker chỉ chạy cho `/api/*`.
-- D1 binding `DB`, migration trong `migrations/` (đánh số tăng dần, không sửa migration đã chạy).
+- D1 binding `DB`: **dùng chung D1 `farmbase` của website farmbase.vn** (gói miễn phí giới hạn 10 D1). Mọi bảng phải có tiền tố `social_`, bảng theo dõi migration là `social_migrations`. Không bao giờ đọc, sửa hay xóa bảng không có tiền tố `social_`.
+- Migration trong `migrations/` (đánh số tăng dần, không sửa migration đã chạy).
 - Biến bí mật: `ADMIN_EMAIL`, `ADMIN_INITIAL_PASSWORD`, `TOKEN_KEY`, `FB_APP_SECRET`. Biến thường: `FB_APP_ID`, `FB_API_VERSION`, tùy chọn `FB_SCOPES`.
 - App Meta "FarmBase Fanpage", ID 1693553165520150, đang ở chế độ phát triển.
 
@@ -16,7 +17,7 @@
 - JavaScript thuần, không bước build. Router trong `src/index.js` (bảng `ROUTES`, tùy chọn `public`, `allowMustChange`, `nav`).
 - Mọi thao tác ghi phải qua kiểm tra cùng nguồn (CSRF) trong router; quyền kiểm tra bằng `requireRole` và `allowedPageIds`.
 - Ghi nhật ký mọi thao tác quan trọng bằng `audit()`. Thêm nhãn tiếng Việt cho hành động mới vào `ACTIONS` trong `public/app.js`.
-- Mật khẩu: PBKDF2 100.000 vòng. Mã Trang: AES-GCM với khóa từ `TOKEN_KEY`.
+- Mật khẩu: PBKDF2 25.000 vòng (vừa giới hạn 10 ms CPU gói miễn phí; số vòng lưu trong chuỗi băm nên nâng được sau). Mã Trang: AES-GCM với khóa từ `TOKEN_KEY`.
 - Giao diện: một file `public/app.js`, định tuyến `#/<trang>`, slug không dấu. Luôn `esc()` dữ liệu trước khi chèn HTML.
 
 ## Kiểm tra trước khi push

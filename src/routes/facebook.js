@@ -51,8 +51,8 @@ export async function fbConnect(request, env, user) {
   const state = randomToken(24);
   const t = now();
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM oauth_states WHERE created_at < ?').bind(t - 900),
-    env.DB.prepare('INSERT INTO oauth_states (state, user_id, created_at) VALUES (?,?,?)').bind(state, user.id, t),
+    env.DB.prepare('DELETE FROM social_oauth_states WHERE created_at < ?').bind(t - 900),
+    env.DB.prepare('INSERT INTO social_oauth_states (state, user_id, created_at) VALUES (?,?,?)').bind(state, user.id, t),
   ]);
   const url = new URL(`https://www.facebook.com/${env.FB_API_VERSION || 'v27.0'}/dialog/oauth`);
   url.searchParams.set('client_id', env.FB_APP_ID);
@@ -71,8 +71,8 @@ export async function fbCallback(request, env, user) {
   if (params.get('error')) return back('loi=huy');
 
   const state = params.get('state') || '';
-  const row = await env.DB.prepare('SELECT * FROM oauth_states WHERE state = ?').bind(state).first();
-  await env.DB.prepare('DELETE FROM oauth_states WHERE state = ?').bind(state).run();
+  const row = await env.DB.prepare('SELECT * FROM social_oauth_states WHERE state = ?').bind(state).first();
+  await env.DB.prepare('DELETE FROM social_oauth_states WHERE state = ?').bind(state).run();
   if (!row || row.user_id !== user.id || row.created_at < now() - 900) return back('loi=het-han');
 
   try {
@@ -112,7 +112,7 @@ export async function fbCallback(request, env, user) {
       const tokenEnc = await encryptSecret(p.access_token, env.TOKEN_KEY);
       stmts.push(
         env.DB.prepare(
-          `INSERT INTO pages (id, name, category, picture_url, access_token_enc, status, fan_count, followers_count, stats_at, last_error, connected_by, connected_at, updated_at)
+          `INSERT INTO social_pages (id, name, category, picture_url, access_token_enc, status, fan_count, followers_count, stats_at, last_error, connected_by, connected_at, updated_at)
            VALUES (?,?,?,?,?, 'active', ?,?,?, NULL, ?,?,?)
            ON CONFLICT(id) DO UPDATE SET name = excluded.name, category = excluded.category, picture_url = excluded.picture_url,
              access_token_enc = excluded.access_token_enc, status = 'active', fan_count = excluded.fan_count,
@@ -137,8 +137,8 @@ export async function listPages(request, env, user) {
   const marks = ids.map(() => '?').join(',');
   const { results } = await env.DB.prepare(
     `SELECT p.id, p.name, p.category, p.picture_url, p.status, p.fan_count, p.followers_count, p.stats_at, p.last_error, p.connected_at,
-       (SELECT COUNT(*) FROM user_pages up WHERE up.page_id = p.id) AS staff_count
-     FROM pages p WHERE p.id IN (${marks}) ORDER BY p.name`
+       (SELECT COUNT(*) FROM social_user_pages up WHERE up.page_id = p.id) AS staff_count
+     FROM social_pages p WHERE p.id IN (${marks}) ORDER BY p.name`
   ).bind(...ids).all();
   return json({ pages: results });
 }
@@ -147,27 +147,27 @@ export async function refreshPage(request, env, user, pageId) {
   requireRole(user, 'owner', 'manager');
   const ids = await allowedPageIds(env, user);
   if (!ids.includes(pageId)) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
-  const page = await env.DB.prepare('SELECT * FROM pages WHERE id = ?').bind(pageId).first();
+  const page = await env.DB.prepare('SELECT * FROM social_pages WHERE id = ?').bind(pageId).first();
   const t = now();
   try {
     const token = await decryptSecret(page.access_token_enc, env.TOKEN_KEY);
     const d = await graph(env, pageId, { access_token: token, fields: 'id,name,category,picture{url},fan_count,followers_count' });
     await env.DB.prepare(
-      "UPDATE pages SET name = ?, category = ?, picture_url = ?, fan_count = ?, followers_count = ?, stats_at = ?, status = 'active', last_error = NULL, updated_at = ? WHERE id = ?"
+      "UPDATE social_pages SET name = ?, category = ?, picture_url = ?, fan_count = ?, followers_count = ?, stats_at = ?, status = 'active', last_error = NULL, updated_at = ? WHERE id = ?"
     ).bind(d.name, d.category || null, d.picture?.data?.url || null, d.fan_count ?? null, d.followers_count ?? null, t, t, pageId).run();
   } catch (e) {
-    await env.DB.prepare("UPDATE pages SET status = 'error', last_error = ?, updated_at = ? WHERE id = ?").bind(e.message.slice(0, 500), t, pageId).run();
+    await env.DB.prepare("UPDATE social_pages SET status = 'error', last_error = ?, updated_at = ? WHERE id = ?").bind(e.message.slice(0, 500), t, pageId).run();
     throw new HttpError(502, `Không cập nhật được từ Facebook: ${e.message}`, 'facebook');
   }
-  const row = await env.DB.prepare('SELECT id, name, category, picture_url, status, fan_count, followers_count, stats_at, last_error FROM pages WHERE id = ?').bind(pageId).first();
+  const row = await env.DB.prepare('SELECT id, name, category, picture_url, status, fan_count, followers_count, stats_at, last_error FROM social_pages WHERE id = ?').bind(pageId).first();
   return json({ page: row });
 }
 
 export async function disconnectPage(request, env, user, pageId) {
   requireRole(user, 'owner');
-  const page = await env.DB.prepare('SELECT id, name FROM pages WHERE id = ?').bind(pageId).first();
+  const page = await env.DB.prepare('SELECT id, name FROM social_pages WHERE id = ?').bind(pageId).first();
   if (!page) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
-  await env.DB.prepare("UPDATE pages SET status = 'disconnected', access_token_enc = NULL, updated_at = ? WHERE id = ?").bind(now(), pageId).run();
+  await env.DB.prepare("UPDATE social_pages SET status = 'disconnected', access_token_enc = NULL, updated_at = ? WHERE id = ?").bind(now(), pageId).run();
   await audit(env, request, user.id, 'page_disconnected', page.name, { id: page.id });
   return json({ ok: true });
 }

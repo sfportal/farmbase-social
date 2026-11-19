@@ -4,7 +4,7 @@ import { hashPassword, verifyPassword, encryptSecret, decryptSecret, tempPasswor
 import { checkPasswordStrength } from '../src/lib/http.js';
 
 const h = await hashPassword('MatKhau-2026');
-assert.ok(h.startsWith('pbkdf2$100000$'));
+assert.ok(h.startsWith('pbkdf2$25000$'));
 assert.equal(await verifyPassword('MatKhau-2026', h), true);
 assert.equal(await verifyPassword('matkhau-2026', h), false);
 assert.equal(await verifyPassword('x', 'rác'), false);
