@@ -6,6 +6,8 @@ import * as users from './routes/users.js';
 import * as fb from './routes/facebook.js';
 import * as posts from './routes/posts.js';
 import * as content from './routes/content.js';
+import * as media from './routes/media.js';
+import * as writing from './routes/writing.js';
 
 // [method, mẫu đường dẫn, hàm, tùy chọn]
 // public: không cần đăng nhập · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
@@ -35,6 +37,11 @@ const ROUTES = [
   ['POST', '/api/content/:id/approve', content.approveContent],
   ['POST', '/api/content/:id/reject', content.rejectContent],
   ['POST', '/api/content/:id/cancel', content.cancelContent],
+  ['POST', '/api/media', media.uploadMedia],
+  ['GET', '/api/media/file/:key', media.mediaFile, { public: true }],
+  ['GET', '/api/rules', writing.readRules],
+  ['PUT', '/api/rules', writing.saveRules],
+  ['POST', '/api/ai/write', writing.aiWrite],
   ['GET', '/api/fb/status', fb.fbStatus],
   ['GET', '/api/fb/connect', fb.fbConnect, { nav: true }],
   ['GET', '/api/fb/callback', fb.fbCallback, { nav: true }],

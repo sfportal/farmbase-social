@@ -19,6 +19,10 @@
       "migrations_dir": "migrations", "migrations_table": "social_migrations"
     }
   ],
+  // Kho ảnh, video tải lên cho bài đăng (R2 gói miễn phí 10 GB)
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "farmbase-social-media" }],
+  // Workers AI: viết bài theo quy định đăng bài (gói miễn phí 10.000 neuron mỗi ngày)
+  "ai": { "binding": "AI" },
   "vars": {
     "FB_APP_ID": "1693553165520150",
     "FB_API_VERSION": "v27.0"

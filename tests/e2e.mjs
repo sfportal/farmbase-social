@@ -24,7 +24,7 @@ const fakeGraph = createServer(async (req, res) => {
     let raw = '';
     for await (const chunk of req) raw += chunk;
     const params = Object.fromEntries(new URLSearchParams(req.method === 'DELETE' ? u.search : raw));
-    const w = u.pathname.match(/^\/v[\d.]+\/(.+?)(?:\/(feed|photos))?$/);
+    const w = u.pathname.match(/^\/v[\d.]+\/(.+?)(?:\/(feed|photos|videos))?$/);
     const pageId = w[1];
     const token = params.access_token;
     delete params.access_token;
@@ -275,6 +275,55 @@ assert.deepEqual(r.data.items.map((i) => [i.page_id, i.status, i.scheduled_at]),
 assert.equal(r.data.item.id, pickId);
 assert.deepEqual(graphWrites.map((w) => w.path), ['/v27.0/111/feed', '/v27.0/222/feed']);
 assert.equal(graphWrites[1].params.scheduled_publish_time, String(at2));
+// Quy định đăng bài và AI viết bài (AI giả trong wrangler.test.jsonc)
+r = await viewer.req('/api/rules', { method: 'PUT', body: { text: 'x' } });
+assert.equal(r.status, 403, 'biên tập không sửa quy định');
+r = await owner.req('/api/rules', { method: 'PUT', body: { text: 'Gọi khách là Quý khách. Luôn có #FarmBase.' } });
+assert.equal(r.status, 200, JSON.stringify(r.data));
+r = await viewer.req('/api/rules');
+assert.equal(r.data.text, 'Gọi khách là Quý khách. Luôn có #FarmBase.');
+assert.equal(r.data.can_edit, false);
+r = await viewer.req('/api/ai/write', { method: 'POST', body: { brief: '' } });
+assert.equal(r.status, 400, 'AI cần ý chính');
+r = await viewer.req('/api/ai/write', { method: 'POST', body: { brief: 'Mời dự hội thảo', page_ids: ['222'], length: 'ngan' } });
+assert.equal(r.status, 200, JSON.stringify(r.data));
+assert.equal(r.data.text, 'Bài AI viết thử [theo quy định]');
+// Tải ảnh, video lên kho (R2 cục bộ), Facebook giả tải về qua đường dẫn công khai
+const upload = (who, bytes, type, name) => fetch(`${BASE}/api/media?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { cookie: who.cookie, origin: BASE, 'content-type': type }, body: bytes }).then(async (x) => ({ status: x.status, data: await x.json() }));
+const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4c40000000049454e44ae426082', 'hex');
+r = await upload(viewer, Buffer.from('xin chao'), 'text/plain', 'a.txt');
+assert.equal(r.status, 400, 'chỉ nhận ảnh, video');
+r = await upload(viewer, png, 'image/png', 'anh-1.png');
+assert.equal(r.status, 201, JSON.stringify(r.data));
+const img1 = r.data.media;
+assert.match(img1.url, /^\/api\/media\/file\/[0-9a-f]{32}\.png$/);
+let fileRes = await fetch(BASE + img1.url);
+assert.equal(fileRes.status, 200);
+assert.equal(fileRes.headers.get('content-type'), 'image/png');
+assert.equal((await fileRes.arrayBuffer()).byteLength, png.length);
+const img2 = (await upload(viewer, png, 'image/png', 'anh-2.png')).data.media;
+const vid = (await upload(viewer, Buffer.alloc(2048, 1), 'video/mp4', 'clip.mp4')).data.media;
+assert.equal(vid.kind, 'video');
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: 'x', media_ids: [img1.id, vid.id] } });
+assert.equal(r.status, 400, 'không trộn ảnh và video');
+// Nhiều ảnh: tải từng ảnh ở chế độ chưa đăng rồi gắn vào một bài
+graphWrites.length = 0;
+r = await owner.req('/api/content', { method: 'POST', body: { page_ids: ['111'], message: 'Album ảnh vườn', media_ids: [img1.id, img2.id], action: 'publish' } });
+assert.equal(r.data.items[0].status, 'published', JSON.stringify(r.data));
+assert.equal(r.data.items[0].media.length, 2);
+assert.deepEqual(graphWrites.map((w) => w.path), ['/v27.0/111/photos', '/v27.0/111/photos', '/v27.0/111/feed']);
+assert.equal(graphWrites[0].params.published, 'false');
+assert.ok(graphWrites[0].params.url.endsWith(img1.url), graphWrites[0].params.url);
+assert.match(JSON.parse(graphWrites[2].params['attached_media[1]']).media_fbid, /^photo\d+$/);
+assert.equal(graphWrites[2].params.message, 'Album ảnh vườn');
+// Bài chỉ có video, hẹn giờ
+graphWrites.length = 0;
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: '', media_ids: [vid.id], action: 'submit' } });
+assert.equal(r.status, 201, 'bài chỉ có video vẫn hợp lệ');
+r = await owner.req(`/api/content/${r.data.items[0].id}/approve`, { method: 'POST', body: {} });
+assert.equal(r.data.item.status, 'published', JSON.stringify(r.data));
+assert.equal(graphWrites[0].path, '/v27.0/222/videos');
+assert.ok(graphWrites[0].params.file_url.endsWith(vid.url));
 // Mã Trang hỏng: bài chuyển sang lỗi, có lý do
 const badEnc = await encryptSecret('ma-sai', KEY);
 sql(`INSERT INTO social_pages (id, name, status, access_token_enc, connected_at, updated_at) VALUES ('333','Fanpage Lỗi','active','${badEnc}',0,0);`);
@@ -288,7 +337,7 @@ r = await viewer.req('/api/content');
 assert.ok(r.data.items.every((i) => i.page_id === '222'), 'biên tập chỉ thấy bài của Trang được giao');
 r = await owner.req('/api/audit');
 assert.ok(['post_published', 'post_scheduled', 'post_cancelled', 'post_rejected', 'post_publish_failed'].every((a) => r.data.entries.some((e) => e.action === a)));
-step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Trang và giờ khi duyệt, hẹn giờ nhiều Trang, hủy lịch, báo lỗi, đúng quyền');
+step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Trang và giờ khi duyệt, quy định và AI viết bài, tải nhiều ảnh và video, hẹn giờ nhiều Trang, hủy lịch, báo lỗi, đúng quyền');
 
 // 11. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
@@ -309,7 +358,7 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'lich-dang', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
     await page.waitForTimeout(['bai-dang', 'lich-dang'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -332,6 +381,7 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.waitForSelector('.chip');
   await page.click('#new');
   await page.waitForSelector('#cf');
+  await page.click('#aibox summary');
   await page.screenshot({ path: `test-output/${label}-soan-bai.png` });
   await page.keyboard.press('Escape');
   await page.click('[data-c-approve]');
