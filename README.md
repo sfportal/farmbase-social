@@ -43,6 +43,10 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | PATCH, DELETE | `/api/content/:id` | Người soạn hoặc Quản lý; chỉ bài chưa lên Facebook |
 | POST | `/api/content/:id/submit` | Người soạn |
 | POST | `/api/content/:id/approve` `{ page_ids?, scheduled_at? }`: duyệt, chọn lại Fanpage (một hoặc nhiều) và giờ đăng; `/reject`, `/cancel` | Chủ hệ thống, Quản lý |
+| POST | `/api/media?name=` (thân là file ảnh JPG/PNG/GIF/WEBP ≤ 10 MB hoặc video MP4/MOV ≤ 95 MB, lưu R2 `MEDIA`) | Mọi vai trò trừ Chăm sóc khách hàng |
+| GET | `/api/media/file/:key` (công khai, tên ngẫu nhiên, để Facebook tải về) | Công khai |
+| GET, PUT | `/api/rules`: quy định đăng bài (văn phong cho AI) | Xem: mọi người · Sửa: Chủ hệ thống, Quản lý |
+| POST | `/api/ai/write` `{ brief, current?, length?, page_ids? }`: AI viết bài theo quy định (Workers AI `AI`) | Mọi vai trò trừ Chăm sóc khách hàng |
 | GET | `/api/fb/status`, `/api/fb/connect`, `/api/fb/callback` | Chủ hệ thống |
 
 ## Chạy thử trên máy

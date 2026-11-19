@@ -12,6 +12,7 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "farmbase-social-test", "database_id": "local-test", "migrations_dir": "migrations", "migrations_table": "social_migrations" }
   ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "farmbase-social-media-test" }],
   "vars": {
     "ADMIN_EMAIL": "admin@example.test",
     "ADMIN_INITIAL_PASSWORD": "MatKhauTam-2026",
@@ -19,6 +20,7 @@
     "FB_APP_ID": "1693553165520150",
     "FB_APP_SECRET": "",
     "FB_API_VERSION": "v27.0",
+    "AI_FAKE_REPLY": "Bài AI viết thử",
     "FB_GRAPH_BASE": "http://localhost:8791"
   }
 }
