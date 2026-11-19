@@ -4,6 +4,28 @@ import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:http';
+import { encryptSecret } from '../src/lib/crypto.js';
+
+// Máy chủ Facebook giả (cổng 8791, khớp FB_GRAPH_BASE trong wrangler.test.jsonc).
+const graphHits = [];
+const fakePost = (pageId, i) => ({
+  id: `${pageId}_${i}`, message: `Bài thử số ${i} của Trang ${pageId}\nDòng thứ hai`, created_time: new Date(Date.UTC(2026, 10, 18 - i)).toISOString(),
+  permalink_url: `https://www.facebook.com/${pageId}/posts/${i}`, status_type: 'added_photos',
+  reactions: { data: [], summary: { total_count: 10 * i } }, comments: { data: [], summary: { total_count: i } }, shares: { count: i % 2 },
+});
+const fakeGraph = createServer((req, res) => {
+  const u = new URL(req.url, 'http://x');
+  graphHits.push(u.pathname + '?' + u.searchParams.toString());
+  const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
+  res.setHeader('content-type', 'application/json');
+  if (!m) { res.statusCode = 404; return res.end('{"error":{"message":"không có","code":100}}'); }
+  if (u.searchParams.get('access_token') !== `ma-trang-${m[1]}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
+  const page2 = u.searchParams.get('after') === 'trang2';
+  const ids = page2 ? [4, 5] : [1, 2, 3];
+  res.end(JSON.stringify({ data: ids.map((i) => fakePost(m[1], i)), paging: page2 ? { cursors: { after: 'het' } } : { cursors: { after: 'trang2' }, next: 'https://graph/next' } }));
+});
+await new Promise((ok) => fakeGraph.listen(8791, ok));
 
 const BASE = process.env.BASE || 'http://localhost:8790';
 const ADMIN = { email: 'admin@example.test', password: 'MatKhauTam-2026' };
@@ -15,7 +37,10 @@ function sql(command) {
 
 // Làm sạch D1 cục bộ và thêm 2 Fanpage giả để thử phân quyền.
 sql("DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
-sql("INSERT INTO social_pages (id, name, status, fan_count, followers_count, connected_at, updated_at) VALUES ('111','Fanpage Thử A','active',120,150,0,0), ('222','Fanpage Thử B','active',30,45,0,0);");
+const KEY = 'khoa-thu-nghiem-chi-dung-tren-may';
+const encA = await encryptSecret('ma-trang-111', KEY);
+const encB = await encryptSecret('ma-trang-222', KEY);
+sql(`INSERT INTO social_pages (id, name, status, fan_count, followers_count, access_token_enc, connected_at, updated_at) VALUES ('111','Fanpage Thử A','active',120,150,'${encA}',0,0), ('222','Fanpage Thử B','active',30,45,'${encB}',0,0);`);
 
 class Client {
   constructor() { this.cookie = ''; }
@@ -138,7 +163,33 @@ r = await owner.req('/api/audit');
 assert.ok(r.data.entries.some((e) => e.action === 'user_created'));
 step('kết nối Facebook báo thiếu cấu hình; nhật ký ghi đủ thao tác');
 
-// 9. Giao diện trên máy tính và điện thoại
+// 9. Bài đăng và số tương tác (đọc từ Facebook giả)
+r = await owner.req('/api/pages/111/posts');
+assert.equal(r.status, 200, JSON.stringify(r.data));
+assert.equal(r.data.posts.length, 3);
+assert.deepEqual([r.data.posts[2].reactions, r.data.posts[2].comments, r.data.posts[2].shares, r.data.posts[2].engagement], [30, 3, 1, 34]);
+assert.equal(r.data.after, 'trang2');
+assert.ok(!JSON.stringify(r.data).includes('ma-trang'), 'không lộ mã Trang ra trình duyệt');
+r = await owner.req('/api/pages/111/posts?after=trang2');
+assert.deepEqual(r.data.posts.map((p) => p.id), ['111_4', '111_5']);
+assert.equal(r.data.after, null);
+r = await owner.req('/api/posts');
+assert.equal(r.data.posts.length, 6);
+assert.deepEqual(new Set(r.data.posts.map((p) => p.page_id)), new Set(['111', '222']));
+assert.ok(r.data.posts[0].created_time >= r.data.posts[5].created_time, 'gộp theo thời gian mới nhất');
+assert.ok(graphHits.some((h) => h.includes('reactions.summary')), 'hỏi Facebook số cảm xúc');
+const viewer = new Client();
+r = await owner.req('/api/users', { method: 'POST', body: { email: 'bientap@example.test', role: 'editor', page_ids: ['222'] } });
+const edPw = r.data.temp_password;
+await viewer.req('/api/auth/login', { method: 'POST', body: { email: 'bientap@example.test', password: edPw } });
+await viewer.req('/api/auth/change-password', { method: 'POST', body: { current_password: edPw, new_password: 'BienTap-2026' } });
+r = await viewer.req('/api/pages/111/posts');
+assert.equal(r.status, 404, 'không xem bài của Trang không được giao');
+r = await viewer.req('/api/posts');
+assert.deepEqual([...new Set(r.data.posts.map((p) => p.page_id))], ['222']);
+step('xem bài đăng và tương tác theo Trang, tải thêm, gộp mọi Trang, đúng phân quyền');
+
+// 10. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 mkdirSync('test-output', { recursive: true });
@@ -156,13 +207,18 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'fanpage', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(route === 'bai-dang' ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
   }
+  await page.goto(`${BASE}/#/bai-dang?trang=111`);
+  await page.waitForSelector('#more');
+  await page.click('#more');
+  await page.waitForFunction(() => document.querySelectorAll('.post').length === 5);
+  await page.screenshot({ path: `test-output/${label}-bai-dang-mot-trang.png`, fullPage: true });
   await page.goto(`${BASE}/#/nhan-vien`);
   await page.click('#add');
   await page.waitForSelector('.modal');
@@ -170,6 +226,7 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await ctx.close();
 }
 await browser.close();
+fakeGraph.close();
 assert.deepEqual(errors, [], errors.join('\n'));
 step('giao diện máy tính 1366px và điện thoại 390px: không tràn ngang, không lỗi JS');
 

@@ -4,6 +4,7 @@ import { currentUser } from './lib/auth.js';
 import * as auth from './routes/auth.js';
 import * as users from './routes/users.js';
 import * as fb from './routes/facebook.js';
+import * as posts from './routes/posts.js';
 
 // [method, mẫu đường dẫn, hàm, tùy chọn]
 // public: không cần đăng nhập · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
@@ -21,6 +22,8 @@ const ROUTES = [
   ['POST', '/api/users/:id/unlock', users.unlockUser],
   ['GET', '/api/audit', users.listAudit],
   ['GET', '/api/pages', fb.listPages],
+  ['GET', '/api/pages/:id/posts', posts.pagePosts],
+  ['GET', '/api/posts', posts.allPosts],
   ['POST', '/api/pages/:id/refresh', fb.refreshPage],
   ['POST', '/api/pages/:id/disconnect', fb.disconnectPage],
   ['GET', '/api/fb/status', fb.fbStatus],

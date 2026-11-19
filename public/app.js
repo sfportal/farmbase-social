@@ -106,6 +106,7 @@ function navItems() {
     { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox', soon: 'GĐ 3' },
     { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal', soon: 'GĐ 2' },
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
+    { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
   ];
   if (me.role === 'owner') {
     items.push({ r: 'nhan-vien', label: 'Nhân viên', ic: 'users' });
@@ -118,7 +119,7 @@ function navItems() {
 function layout(active, title, sub, body, actions = '') {
   const items = navItems();
   const side = items.map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''} ${i.soon ? 'soon' : ''}" ${i.soon ? 'aria-disabled="true" tabindex="-1"' : ''}>${icon(i.ic)}<span>${i.label}</span>${i.soon ? `<span class="tag">${i.soon}</span>` : ''}</a>`).join('');
-  const mobile = ['tong-quan', 'fanpage', me.role === 'owner' ? 'nhan-vien' : null, 'tai-khoan']
+  const mobile = ['tong-quan', 'fanpage', 'bai-dang', me.role === 'owner' ? 'nhan-vien' : null, 'tai-khoan']
     .filter(Boolean).map((r) => items.find((i) => i.r === r))
     .map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''}">${icon(i.ic)}<span>${i.label}</span></a>`).join('');
   $app.innerHTML = `<div class="shell">
@@ -229,7 +230,8 @@ async function viewHome() {
     <div class="card" style="margin-top:16px"><h2>Lộ trình</h2>
       <ul class="muted" style="margin:0;padding-left:20px">
         <li><b>Giai đoạn 1 (đang dùng):</b> tài khoản, phân quyền, kết nối Fanpage, số liệu cơ bản.</li>
-        <li><b>Giai đoạn 2:</b> lịch nội dung, duyệt và đăng bài tự động, số liệu từng bài.</li>
+        <li><b>Đã có:</b> xem bài đăng và số tương tác từng bài theo Fanpage (mục Bài đăng).</li>
+        <li><b>Giai đoạn 2:</b> lịch nội dung, duyệt và đăng bài tự động.</li>
         <li><b>Giai đoạn 3:</b> hộp thư chung, trả lời bình luận và tin nhắn tự động.</li>
         <li><b>Giai đoạn 4:</b> CRM mini, ghi đơn, AI bán hàng, báo cáo tuần.</li>
       </ul></div>`;
@@ -262,7 +264,7 @@ async function viewPages(q) {
       <div class="grow"><div class="ellipsis"><b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span></div>
         <div class="muted small">${fmtNum(p.followers_count)} người theo dõi · ${fmtNum(p.fan_count)} lượt thích${owner ? ` · ${p.staff_count} nhân viên được giao` : ''}</div>
         <div class="muted small">Cập nhật: ${fmtTime(p.stats_at)}${p.last_error ? ` · ${esc(p.last_error)}` : ''}</div></div>
-      <div class="row">${canRefresh ? `<button class="btn ghost sm" data-refresh="${esc(p.id)}">Cập nhật</button>` : ''}
+      <div class="row"><a class="btn ghost sm" href="#/bai-dang?trang=${encodeURIComponent(p.id)}">Bài đăng</a>${canRefresh ? `<button class="btn ghost sm" data-refresh="${esc(p.id)}">Cập nhật</button>` : ''}
         ${owner ? `<button class="btn danger sm" data-disc="${esc(p.id)}" data-name="${esc(p.name)}">Ngắt</button>` : ''}</div></div>`;
   }).join('');
   document.getElementById('view').innerHTML = `${notice}${setup}<div class="card">${rows || `<p class="muted" style="margin:0">${owner ? 'Chưa có Fanpage nào. Bấm "Kết nối Fanpage", đăng nhập Facebook và chọn các Trang Quý khách quản trị.' : 'Quý khách chưa được giao Fanpage nào.'}</p>`}</div>
@@ -278,6 +280,100 @@ async function viewPages(q) {
     try { await api(`/api/pages/${encodeURIComponent(b.dataset.disc)}/disconnect`, { method: 'POST' }); toast('Đã ngắt kết nối'); viewPages(new URLSearchParams()); }
     catch (e) { toast(e.message); }
   }));
+}
+
+// ---------- Bài đăng ----------
+const postState = { page: 'all', sort: 'new', posts: [], after: null, errors: [] };
+
+function postCard(p, showPage) {
+  const time = fmtTime(p.created_time);
+  return `<article class="post">
+    ${p.picture ? `<img class="thumb" src="${esc(p.picture)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="thumb empty"></div>'}
+    <div class="grow">
+      <div class="muted small ellipsis">${showPage ? `<b>${esc(p.page_name)}</b> · ` : ''}${time}</div>
+      <div class="msg">${p.message ? esc(p.message) : '<span class="muted">(Bài không có chữ)</span>'}</div>
+      <div class="metrics">
+        <span title="Cảm xúc (thích, yêu thích…)">👍 <b>${fmtNum(p.reactions)}</b> cảm xúc</span>
+        <span title="Bình luận">💬 <b>${fmtNum(p.comments)}</b> bình luận</span>
+        <span title="Chia sẻ">↗ <b>${fmtNum(p.shares)}</b> chia sẻ</span>
+        ${p.permalink_url ? `<a href="${esc(p.permalink_url)}" target="_blank" rel="noopener">Xem trên Facebook</a>` : ''}
+      </div>
+    </div></article>`;
+}
+
+function renderPosts() {
+  const list = [...postState.posts];
+  if (postState.sort === 'top') list.sort((a, b) => b.engagement - a.engagement);
+  const sum = (k) => list.reduce((s, p) => s + (p[k] || 0), 0);
+  const n = list.length;
+  const avg = n ? Math.round(sum('engagement') / n) : 0;
+  const all = postState.page === 'all';
+  const errs = postState.errors.map((e) => `<div class="alert err">${esc(e.page_name)}: ${esc(e.message)}</div>`).join('');
+  document.getElementById('posts').innerHTML = `${errs}
+    <div class="grid stats4">
+      <div class="card stat"><div class="muted small">Số bài đang xem</div><div class="n">${fmtNum(n)}</div></div>
+      <div class="card stat"><div class="muted small">Tổng cảm xúc</div><div class="n">${fmtNum(sum('reactions'))}</div></div>
+      <div class="card stat"><div class="muted small">Tổng bình luận</div><div class="n">${fmtNum(sum('comments'))}</div></div>
+      <div class="card stat"><div class="muted small">Tổng chia sẻ</div><div class="n">${fmtNum(sum('shares'))}</div></div>
+    </div>
+    <p class="muted small">Trung bình ${fmtNum(avg)} tương tác mỗi bài. Số liệu lấy trực tiếp từ Facebook lúc tải trang.</p>
+    <div class="card">${n ? list.map((p) => postCard(p, all)).join('') : '<p class="muted" style="margin:0">Chưa có bài đăng nào.</p>'}</div>
+    ${!all && postState.after ? '<div class="row" style="justify-content:center;margin-top:16px"><button class="btn ghost" id="more">Tải thêm bài</button></div>' : ''}`;
+  const more = document.getElementById('more');
+  if (more) more.onclick = async () => {
+    more.disabled = true; more.textContent = 'Đang tải…';
+    try {
+      const d = await api(`/api/pages/${encodeURIComponent(postState.page)}/posts?limit=25&after=${encodeURIComponent(postState.after)}`);
+      postState.posts.push(...d.posts); postState.after = d.after; renderPosts();
+    } catch (e) { toast(e.message); more.disabled = false; more.textContent = 'Tải thêm bài'; }
+  };
+}
+
+async function loadPosts() {
+  const box = document.getElementById('posts');
+  box.innerHTML = '<div class="muted">Đang tải bài đăng từ Facebook…</div>';
+  try {
+    if (postState.page === 'all') {
+      const d = await api('/api/posts?limit=10');
+      Object.assign(postState, { posts: d.posts, after: null, errors: d.errors || [] });
+    } else {
+      const d = await api(`/api/pages/${encodeURIComponent(postState.page)}/posts?limit=25`);
+      Object.assign(postState, { posts: d.posts, after: d.after, errors: [] });
+    }
+    renderPosts();
+  } catch (e) {
+    box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`;
+  }
+}
+
+async function viewPosts(q) {
+  layout('bai-dang', 'Bài đăng', 'Bài đã đăng và số tương tác theo từng Fanpage', '<div class="muted">Đang tải…</div>');
+  const { pages } = await api('/api/pages');
+  const usable = pages.filter((p) => p.status !== 'disconnected');
+  if (!usable.length) {
+    document.getElementById('view').innerHTML = `<div class="card"><p class="muted" style="margin:0">${me.role === 'owner'
+      ? 'Chưa có Fanpage nào. Vào mục Fanpage và bấm "Kết nối Fanpage" trước.' : 'Quý khách chưa được giao Fanpage nào.'}</p></div>`;
+    return;
+  }
+  const want = q.get('trang');
+  postState.page = want && usable.some((p) => p.id === want) ? want : (usable.length === 1 ? usable[0].id : 'all');
+  document.getElementById('view').innerHTML = `
+    <div class="card filters">
+      <div><label for="pg">Fanpage</label><select id="pg">
+        ${usable.length > 1 ? '<option value="all">Tất cả Fanpage (10 bài mới nhất mỗi Trang)</option>' : ''}
+        ${usable.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div><label for="sort">Sắp xếp</label><select id="sort">
+        <option value="new">Mới nhất</option><option value="top">Nhiều tương tác nhất</option></select></div>
+      <div class="end"><button class="btn ghost" id="reload">Tải lại</button></div>
+    </div>
+    <div id="posts"></div>`;
+  const pg = document.getElementById('pg');
+  const sort = document.getElementById('sort');
+  pg.value = postState.page; sort.value = postState.sort;
+  pg.onchange = () => { postState.page = pg.value; loadPosts(); };
+  sort.onchange = () => { postState.sort = sort.value; renderPosts(); };
+  document.getElementById('reload').onclick = loadPosts;
+  await loadPosts();
 }
 
 // ---------- Nhân viên ----------
@@ -401,6 +497,7 @@ async function render() {
   try {
     switch (path) {
       case 'fanpage': return await viewPages(q);
+      case 'bai-dang': return await viewPosts(q);
       case 'nhan-vien': return me.role === 'owner' ? await viewUsers() : go('tong-quan');
       case 'nhat-ky': return me.role === 'owner' ? await viewAudit() : go('tong-quan');
       case 'tai-khoan': return viewAccount();
