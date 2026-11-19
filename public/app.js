@@ -386,6 +386,48 @@ function contentCard(c, perms) {
     </div></article>`;
 }
 
+// Bước duyệt: người duyệt chọn Fanpage (một hoặc nhiều) và giờ đăng, rồi đăng ngay hoặc hẹn giờ.
+function openApprove(c) {
+  const pages = calPages.some((p) => p.id === c.page_id) ? calPages : [{ id: c.page_id, name: c.page_name }, ...calPages];
+  modal(`<h2>Duyệt và lên lịch đăng</h2>
+    <div class="muted small ellipsis">${esc((c.message || '(Bài chỉ có ảnh hoặc liên kết)').slice(0, 140))}</div>
+    <form id="apf" novalidate>
+      <label>Đăng lên Fanpage</label>
+      <div class="pick">${pages.map((p) => `<label class="check"><input type="checkbox" name="pg" value="${esc(p.id)}" ${p.id === c.page_id ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')}</div>
+      <label for="apw">Thời gian đăng</label><input id="apw" type="datetime-local" value="${toLocalInput(c.scheduled_at)}">
+      <div class="muted small">Để trống: đăng ngay. Hẹn giờ: cách hiện tại ít nhất 10 phút, tối đa 30 ngày; Facebook tự đăng đúng giờ.</div>
+      <div id="apmsg"></div>
+      <div class="actions"><button type="button" class="btn ghost" data-close>Hủy</button><button type="button" class="btn" data-go>Đăng</button></div>
+    </form>`, (m, close) => {
+    const f = m.querySelector('#apf');
+    const go = m.querySelector('[data-go]');
+    const msgBox = m.querySelector('#apmsg');
+    const label = () => {
+      const t = f.apw.value ? Math.floor(new Date(f.apw.value).getTime() / 1000) : null;
+      const n = f.querySelectorAll('input[name=pg]:checked').length;
+      go.textContent = `${t && t > Date.now() / 1000 + 600 ? 'Hẹn giờ đăng' : 'Đăng ngay'}${n > 1 ? ` lên ${n} Fanpage` : ''}`;
+    };
+    f.oninput = label; f.onchange = label; label();
+    m.querySelector('[data-close]').onclick = close;
+    go.onclick = async () => {
+      const page_ids = [...f.querySelectorAll('input[name=pg]:checked')].map((i) => i.value);
+      if (!page_ids.length) { msgBox.innerHTML = '<div class="alert err">Vui lòng chọn ít nhất một Fanpage.</div>'; return; }
+      const scheduled_at = f.apw.value ? Math.floor(new Date(f.apw.value).getTime() / 1000) : null;
+      m.querySelectorAll('button').forEach((x) => (x.disabled = true));
+      try {
+        const r = await api(`/api/content/${c.id}/approve`, { method: 'POST', body: { page_ids, scheduled_at } });
+        close();
+        const failed = r.items.filter((i) => i.status === 'failed').length;
+        toast(failed ? `Có ${failed} bài đăng lỗi, xem chi tiết trong danh sách` : 'Đã gửi lên Facebook');
+        loadCalendar();
+      } catch (e) {
+        msgBox.innerHTML = `<div class="alert err">${esc(e.message)}</div>`;
+        m.querySelectorAll('button').forEach((x) => (x.disabled = false));
+      }
+    };
+  });
+}
+
 let calPages = [];
 async function loadCalendar() {
   const box = document.getElementById('cal');
@@ -411,14 +453,7 @@ async function loadCalendar() {
   const act = async (btn, fn, ok) => { btn.disabled = true; try { await fn(); toast(ok); loadCalendar(); } catch (e) { toast(e.message); btn.disabled = false; } };
   box.querySelectorAll('[data-c-edit]').forEach((b) => (b.onclick = () => openContentForm(calPages, byId[b.dataset.cEdit], perms)));
   box.querySelectorAll('[data-c-submit]').forEach((b) => (b.onclick = () => act(b, () => api(`/api/content/${b.dataset.cSubmit}/submit`, { method: 'POST' }), 'Đã gửi duyệt')));
-  box.querySelectorAll('[data-c-approve]').forEach((b) => (b.onclick = async () => {
-    const c = byId[b.dataset.cApprove];
-    const when = c.scheduled_at && c.scheduled_at > Date.now() / 1000 + 600 ? `hẹn giờ đăng lúc ${fmtTime(c.scheduled_at)}` : 'đăng ngay';
-    if (!(await confirmBox('Đăng thật lên Fanpage?', `Bài sẽ được ${when} trên "${c.page_name}".`, 'Đăng'))) return;
-    b.disabled = true;
-    try { const r = await api(`/api/content/${c.id}/approve`, { method: 'POST' }); toast(r.item.status === 'failed' ? 'Đăng lỗi, xem chi tiết trong bài' : 'Đã gửi lên Facebook'); loadCalendar(); }
-    catch (e) { toast(e.message); b.disabled = false; }
-  }));
+  box.querySelectorAll('[data-c-approve]').forEach((b) => (b.onclick = () => openApprove(byId[b.dataset.cApprove])));
   box.querySelectorAll('[data-c-reject]').forEach((b) => (b.onclick = () => {
     modal(`<h2>Từ chối bài</h2><label for="why">Lý do (người soạn sẽ thấy)</label><textarea id="why" rows="3" maxlength="500"></textarea>
       <div class="actions"><button class="btn ghost" data-no>Hủy</button><button class="btn danger" data-yes>Từ chối</button></div>`, (m, close) => {

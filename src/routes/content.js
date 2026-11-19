@@ -158,12 +158,45 @@ export async function rejectContent(request, env, user, id) {
   return json({ item: shape(await loadItem(env, user, row.id), now()) });
 }
 
-// POST /api/content/:id/approve : duyệt và đăng (ngay hoặc hẹn giờ trên Facebook)
+// POST /api/content/:id/approve { page_ids?, scheduled_at? } : duyệt và đăng (ngay hoặc hẹn giờ trên Facebook).
+// Người duyệt có thể chọn lại Fanpage (một hoặc nhiều) và giờ đăng ngay ở bước này.
 export async function approveContent(request, env, user, id) {
   requireRole(user, 'owner', 'manager');
   const row = await loadItem(env, user, id);
   if (!['pending', 'draft', 'rejected', 'failed'].includes(row.status)) throw new HttpError(409, 'Bài đã đăng hoặc đã hẹn giờ', 'bad_status');
-  return json({ item: await publishItem(env, request, user, row) });
+  const text = await request.text();
+  let body = {};
+  if (text.trim()) {
+    try { body = JSON.parse(text); } catch { throw new HttpError(400, 'Dữ liệu gửi lên không hợp lệ', 'bad_json'); }
+    if (!body || typeof body !== 'object') throw new HttpError(400, 'Dữ liệu gửi lên không hợp lệ', 'bad_json');
+  }
+  const t = now();
+  let pageIds = [row.page_id];
+  if (body.page_ids !== undefined) {
+    const allowed = await allowedPageIds(env, user);
+    pageIds = [...new Set(Array.isArray(body.page_ids) ? body.page_ids.map(String) : [])];
+    if (!pageIds.length) throw new HttpError(400, 'Vui lòng chọn ít nhất một Fanpage', 'no_page');
+    if (pageIds.length > 20) throw new HttpError(400, 'Mỗi lần tối đa 20 Fanpage', 'too_many');
+    if (pageIds.some((p) => !allowed.includes(p))) throw new HttpError(400, 'Có Fanpage không được giao cho Quý khách', 'bad_page');
+  }
+  let scheduledAt = row.scheduled_at;
+  if (body.scheduled_at !== undefined) {
+    scheduledAt = cleanFields({ message: row.message, link: row.link, image_url: row.image_url, scheduled_at: body.scheduled_at }, t).scheduled_at;
+  }
+  // Trang đầu tiên dùng chính bài này; mỗi Trang thêm tạo một bản sao rồi đăng cùng lúc.
+  const [first, ...extra] = pageIds;
+  await env.DB.prepare('UPDATE social_content SET page_id = ?, scheduled_at = ?, updated_at = ? WHERE id = ?').bind(first, scheduledAt, t, row.id).run();
+  const ids = [row.id];
+  for (const pageId of extra) {
+    const r = await env.DB.prepare(
+      `INSERT INTO social_content (page_id, message, link, image_url, scheduled_at, status, created_by, created_at, updated_at)
+       VALUES (?,?,?,?,?,'pending',?,?,?) RETURNING id`
+    ).bind(pageId, row.message, row.link, row.image_url, scheduledAt, row.created_by, t, t).first();
+    ids.push(r.id);
+  }
+  const items = [];
+  for (const cid of ids) items.push(await publishItem(env, request, user, await loadItem(env, user, cid)));
+  return json({ item: items[0], items });
 }
 
 // POST /api/content/:id/cancel : hủy lịch đã hẹn trên Facebook, bài quay về nháp
