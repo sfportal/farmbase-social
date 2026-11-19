@@ -42,7 +42,7 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | GET, POST | `/api/content` | Đã đăng nhập (Fanpage được giao); soạn bài: trừ Chăm sóc khách hàng; `action=publish`: Chủ hệ thống, Quản lý |
 | PATCH, DELETE | `/api/content/:id` | Người soạn hoặc Quản lý; chỉ bài chưa lên Facebook |
 | POST | `/api/content/:id/submit` | Người soạn |
-| POST | `/api/content/:id/approve`, `/reject`, `/cancel` | Chủ hệ thống, Quản lý |
+| POST | `/api/content/:id/approve` `{ page_ids?, scheduled_at? }`: duyệt, chọn lại Fanpage (một hoặc nhiều) và giờ đăng; `/reject`, `/cancel` | Chủ hệ thống, Quản lý |
 | GET | `/api/fb/status`, `/api/fb/connect`, `/api/fb/callback` | Chủ hệ thống |
 
 ## Chạy thử trên máy

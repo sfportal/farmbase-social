@@ -260,6 +260,21 @@ graphWrites.length = 0;
 r = await owner.req(`/api/content/${schedId}/cancel`, { method: 'POST' });
 assert.equal(r.data.item.status, 'draft');
 assert.equal(graphWrites[0].method, 'DELETE');
+// Bước duyệt: người duyệt chọn lại Fanpage (thêm Trang 111) và giờ hẹn
+r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: 'Bài chờ chọn Trang', action: 'submit' } });
+const pickId = r.data.items[0].id;
+r = await owner.req(`/api/content/${pickId}/approve`, { method: 'POST', body: { page_ids: ['999'] } });
+assert.equal(r.status, 400, 'không đăng lên Trang không có');
+r = await owner.req(`/api/content/${pickId}/approve`, { method: 'POST', body: { page_ids: [] } });
+assert.equal(r.status, 400, 'phải chọn ít nhất một Trang');
+const at2 = nowS() + 5 * 3600;
+graphWrites.length = 0;
+r = await owner.req(`/api/content/${pickId}/approve`, { method: 'POST', body: { page_ids: ['111', '222'], scheduled_at: at2 } });
+assert.equal(r.status, 200, JSON.stringify(r.data));
+assert.deepEqual(r.data.items.map((i) => [i.page_id, i.status, i.scheduled_at]), [['111', 'scheduled', at2], ['222', 'scheduled', at2]]);
+assert.equal(r.data.item.id, pickId);
+assert.deepEqual(graphWrites.map((w) => w.path), ['/v27.0/111/feed', '/v27.0/222/feed']);
+assert.equal(graphWrites[1].params.scheduled_publish_time, String(at2));
 // Mã Trang hỏng: bài chuyển sang lỗi, có lý do
 const badEnc = await encryptSecret('ma-sai', KEY);
 sql(`INSERT INTO social_pages (id, name, status, access_token_enc, connected_at, updated_at) VALUES ('333','Fanpage Lỗi','active','${badEnc}',0,0);`);
@@ -268,12 +283,12 @@ assert.equal(r.data.items[0].status, 'failed');
 assert.match(r.data.items[0].last_error, /không hợp lệ/);
 // Danh sách và quyền xem
 r = await owner.req('/api/content');
-assert.ok(r.data.counts.published >= 1 && r.data.counts.scheduled === 1 && r.data.counts.failed === 1 && r.data.counts.draft === 1, JSON.stringify(r.data.counts));
+assert.ok(r.data.counts.published >= 1 && r.data.counts.scheduled === 3 && r.data.counts.failed === 1 && r.data.counts.draft === 1, JSON.stringify(r.data.counts));
 r = await viewer.req('/api/content');
 assert.ok(r.data.items.every((i) => i.page_id === '222'), 'biên tập chỉ thấy bài của Trang được giao');
 r = await owner.req('/api/audit');
 assert.ok(['post_published', 'post_scheduled', 'post_cancelled', 'post_rejected', 'post_publish_failed'].every((a) => r.data.entries.some((e) => e.action === a)));
-step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, hẹn giờ nhiều Trang, hủy lịch, báo lỗi, đúng quyền');
+step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Trang và giờ khi duyệt, hẹn giờ nhiều Trang, hủy lịch, báo lỗi, đúng quyền');
 
 // 11. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
@@ -318,6 +333,10 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.click('#new');
   await page.waitForSelector('#cf');
   await page.screenshot({ path: `test-output/${label}-soan-bai.png` });
+  await page.keyboard.press('Escape');
+  await page.click('[data-c-approve]');
+  await page.waitForSelector('#apf');
+  await page.screenshot({ path: `test-output/${label}-duyet-chon-trang.png` });
   await page.keyboard.press('Escape');
   await page.goto(`${BASE}/#/nhan-vien`);
   await page.click('#add');
