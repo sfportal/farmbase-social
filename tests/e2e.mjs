@@ -189,6 +189,15 @@ r = await viewer.req('/api/posts');
 assert.deepEqual([...new Set(r.data.posts.map((p) => p.page_id))], ['222']);
 step('xem bài đăng và tương tác theo Trang, tải thêm, gộp mọi Trang, đúng phân quyền');
 
+// Trang công khai cho Meta duyệt: mở được khi chưa đăng nhập
+for (const f of ['chinh-sach-quyen-rieng-tu', 'dieu-khoan', 'xoa-du-lieu']) {
+  const res = await fetch(`${BASE}/${f}.html`);
+  assert.equal(res.status, 200, f);
+  const body = await res.text();
+  assert.ok(body.includes('id="en"') && body.includes('info@bvi.vn'), f);
+}
+step('trang chính sách, điều khoản, xóa dữ liệu công khai, có tiếng Anh');
+
 // 10. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -213,6 +222,12 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
+  }
+  for (const f of ['chinh-sach-quyen-rieng-tu', 'xoa-du-lieu']) {
+    await page.goto(`${BASE}/${f}.html`);
+    const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(ov <= 1, `${label} ${f}: tràn ngang ${ov}px`);
+    await page.screenshot({ path: `test-output/${label}-${f}.png`, fullPage: true });
   }
   await page.goto(`${BASE}/#/bai-dang?trang=111`);
   await page.waitForSelector('#more');
