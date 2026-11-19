@@ -10,6 +10,8 @@ Khi nâng gói Workers Paid sau này, có thể chuyển sang D1 riêng.
 
 ## 2. Tạo Worker và nối GitHub
 
+Đã làm: Worker `farmbase-social` trong tài khoản Cloudflare có website farmbase.vn, địa chỉ mặc định `https://farmbase-social.sfportal.workers.dev`.
+
 1. Cloudflare → **Workers & Pages → Create → Import a repository**, chọn `sfportal/farmbase-social`, nhánh `main`.
 2. Lệnh build để trống. Lệnh deploy:
    ```
