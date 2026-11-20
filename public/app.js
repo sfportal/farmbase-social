@@ -388,6 +388,7 @@ async function loadThread(cid, data) {
         <div class="muted small">${esc(c.page_name)} · ${isMsg ? 'Tin nhắn Messenger' : 'Bình luận trên bài viết'}</div>
         <div class="muted small">Liên hệ lần đầu: ${fmtTime(c.created_at)} · ${c.counts ? `${c.counts.in} tin của khách, ${c.counts.out} tin đã trả lời` : ''}</div></div></div>
       ${linkBtns ? `<div class="row">${linkBtns}</div>` : ''}
+      ${c.profile_error ? `<div class="muted small">Chưa lấy được tên khách: ${esc(c.profile_error)}</div>` : ''}
       <div class="muted small">Facebook không cho phần mềm ngoài mở trực tiếp trang cá nhân của khách. ${isMsg ? 'Bấm "Mở trong Meta Business Suite"' : 'Bấm "Xem bình luận"'}, rồi bấm tên khách ở đó để xem trang cá nhân.</div></div>
     <div class="msgs" id="msgs">${msgs || '<p class="muted">Chưa có nội dung.</p>'}</div>${note}
     <form id="rf" class="reply">${isMsg ? '' : `<div class="row small" id="rmode"><label class="check"><input type="radio" name="mode" value="public" checked> Trả lời công khai</label><label class="check"><input type="radio" name="mode" value="private"> Nhắn riêng (Messenger)</label><span class="muted" id="rto"></span></div>`}
