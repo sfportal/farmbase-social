@@ -104,7 +104,7 @@ const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 function navItems() {
   const items = [
     { r: 'tong-quan', label: 'Tổng quan', ic: 'home' },
-    { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox', soon: 'GĐ 3' },
+    { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox' },
     { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal' },
     { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule' },
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
@@ -120,8 +120,8 @@ function navItems() {
 
 function layout(active, title, sub, body, actions = '') {
   const items = navItems();
-  const side = items.map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''} ${i.soon ? 'soon' : ''}" ${i.soon ? 'aria-disabled="true" tabindex="-1"' : ''}>${icon(i.ic)}<span>${i.label}</span>${i.soon ? `<span class="tag">${i.soon}</span>` : ''}</a>`).join('');
-  const mobile = ['tong-quan', 'lich-dang', 'bai-dang', 'fanpage', 'tai-khoan']
+  const side = items.map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''} ${i.soon ? 'soon' : ''}" ${i.soon ? 'aria-disabled="true" tabindex="-1"' : ''}>${icon(i.ic)}<span>${i.label}</span>${i.soon ? `<span class="tag">${i.soon}</span>` : ''}${i.r === 'hop-thu' ? '<span class="tag unread" data-unread hidden></span>' : ''}</a>`).join('');
+  const mobile = ['tong-quan', 'hop-thu', 'lich-dang', 'fanpage', 'tai-khoan']
     .filter(Boolean).map((r) => items.find((i) => i.r === r))
     .map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''}">${icon(i.ic)}<span>${i.label}</span></a>`).join('');
   $app.innerHTML = `<div class="shell">
@@ -132,6 +132,15 @@ function layout(active, title, sub, body, actions = '') {
       <div id="view">${body}</div></main>
     <nav class="bottom" aria-label="Menu">${mobile}</nav></div>`;
   window.scrollTo(0, 0);
+  refreshUnread();
+}
+
+// Số cuộc trò chuyện chưa đọc, hiện cạnh mục Hộp thư.
+async function refreshUnread(n) {
+  if (n === undefined) {
+    try { n = (await api('/api/inbox?unread=1', { quiet: true })).unread_total; } catch { return; }
+  }
+  document.querySelectorAll('[data-unread]').forEach((el) => { el.textContent = n > 99 ? '99+' : String(n); el.hidden = !n; });
 }
 
 // ---------- Đăng nhập ----------
@@ -235,7 +244,7 @@ async function viewHome() {
         <li><b>Giai đoạn 1 (đang dùng):</b> tài khoản, phân quyền, kết nối Fanpage, số liệu cơ bản.</li>
         <li><b>Đã có:</b> xem bài đăng và số tương tác từng bài theo Fanpage (mục Bài đăng).</li>
         <li><b>Đã có:</b> lịch đăng bài, duyệt bài, đăng ngay hoặc hẹn giờ lên Fanpage (mục Lịch đăng).</li>
-        <li><b>Giai đoạn 3:</b> hộp thư chung, trả lời bình luận và tin nhắn tự động.</li>
+        <li><b>Đã có:</b> hộp thư chung tin nhắn và bình luận, trả lời ngay trong hệ thống, tự nhắn tin khi khách bình luận (mục Hộp thư).</li>
         <li><b>Giai đoạn 4:</b> CRM mini, ghi đơn, AI bán hàng, báo cáo tuần.</li>
       </ul></div>`;
 }
@@ -267,22 +276,132 @@ async function viewPages(q) {
       <div class="grow"><div class="ellipsis"><b>${esc(p.name)}</b> <span class="badge ${cls}">${label}</span></div>
         <div class="muted small">${fmtNum(p.followers_count)} người theo dõi · ${fmtNum(p.fan_count)} lượt thích${owner ? ` · ${p.staff_count} nhân viên được giao` : ''}</div>
         <div class="muted small">Cập nhật: ${fmtTime(p.stats_at)}${p.last_error ? ` · ${esc(p.last_error)}` : ''}</div></div>
-      <div class="row"><a class="btn ghost sm" href="#/bai-dang?trang=${encodeURIComponent(p.id)}">Bài đăng</a>${canRefresh ? `<button class="btn ghost sm" data-refresh="${esc(p.id)}">Cập nhật</button>` : ''}
+      <div class="row"><a class="btn ghost sm" href="#/bai-dang?trang=${encodeURIComponent(p.id)}">Bài đăng</a>${canRefresh ? `<button class="btn ghost sm" data-auto="${esc(p.id)}" data-name="${esc(p.name)}">Tự trả lời</button><button class="btn ghost sm" data-refresh="${esc(p.id)}">Cập nhật</button>` : ''}
         ${owner ? `<button class="btn danger sm" data-disc="${esc(p.id)}" data-name="${esc(p.name)}">Ngắt</button>` : ''}</div></div>`;
   }).join('');
   document.getElementById('view').innerHTML = `${notice}${setup}<div class="card">${rows || `<p class="muted" style="margin:0">${owner ? 'Chưa có Fanpage nào. Bấm "Kết nối Fanpage", đăng nhập Facebook và chọn các Trang Quý khách quản trị.' : 'Quý khách chưa được giao Fanpage nào.'}</p>`}</div>
-    ${owner ? '<p class="muted small">Kết nối lại bất cứ lúc nào để thêm Trang mới hoặc làm mới mã truy cập. Mã truy cập được mã hóa trước khi lưu.</p>' : ''}`;
+    ${owner ? '<p class="muted small">Kết nối lại bất cứ lúc nào để thêm Trang mới hoặc làm mới mã truy cập. Mã truy cập được mã hóa trước khi lưu.</p>' : ''}
+    ${status && status.webhook_url ? `<details class="card hook"><summary><b>Cài đặt nhận tin nhắn, bình luận (webhook)</b></summary>
+      <p class="muted small">Khai báo một lần trong app Facebook (mục Webhooks của Messenger và của Page). Sau đó bấm "Cập nhật" ở từng Trang để Trang bắt đầu gửi tin nhắn, bình luận về hệ thống.</p>
+      <label>Callback URL</label><div class="secret">${esc(status.webhook_url)}</div>
+      <label>Verify token</label><div class="secret">${esc(status.webhook_verify_token)}</div>
+      <p class="muted small">Trường cần đăng ký: <code>messages</code>, <code>message_echoes</code> (Messenger) và <code>feed</code> (Page).</p></details>` : ''}`;
 
   document.querySelectorAll('[data-refresh]').forEach((b) => (b.onclick = async () => {
     b.disabled = true;
     try { await api(`/api/pages/${encodeURIComponent(b.dataset.refresh)}/refresh`, { method: 'POST' }); toast('Đã cập nhật số liệu'); viewPages(new URLSearchParams()); }
     catch (e) { toast(e.message); b.disabled = false; }
   }));
+  document.querySelectorAll('[data-auto]').forEach((b) => (b.onclick = () => openAutoReply(b.dataset.auto, b.dataset.name)));
   document.querySelectorAll('[data-disc]').forEach((b) => (b.onclick = async () => {
     if (!(await confirmBox('Ngắt kết nối Fanpage?', `Hệ thống sẽ xóa mã truy cập của "${b.dataset.name}" và dừng mọi việc tự động trên Trang này. Có thể kết nối lại sau.`, 'Ngắt kết nối', true))) return;
     try { await api(`/api/pages/${encodeURIComponent(b.dataset.disc)}/disconnect`, { method: 'POST' }); toast('Đã ngắt kết nối'); viewPages(new URLSearchParams()); }
     catch (e) { toast(e.message); }
   }));
+}
+
+
+// ---------- Hộp thư ----------
+const CHANNEL = { message: '', comment: 'Bình luận', public_reply: 'Trả lời bình luận', private_reply: 'Nhắn riêng' };
+const inboxState = { kind: '', page: '', unread: false };
+
+function openAutoReply(pageId, pageName) {
+  modal(`<h2>Tự trả lời khi khách bình luận</h2><p class="muted small" style="margin-top:0">${esc(pageName)}</p><div id="arbox" class="muted">Đang tải…</div>`, async (m, close) => {
+    let d;
+    try { d = await api(`/api/pages/${encodeURIComponent(pageId)}/autoreply`); } catch (e) { m.querySelector('#arbox').textContent = e.message; return; }
+    const a = d.autoreply;
+    m.querySelector('#arbox').outerHTML = `
+      <p class="muted small">Khi khách bình luận lần đầu trên một bài, hệ thống tự gửi. Mỗi khách chỉ nhận 1 lần cho mỗi bài. Viết <code>{ten}</code> để chèn tên khách.</p>
+      <label class="check"><input type="checkbox" id="aron" ${a.enabled ? 'checked' : ''}> Nhắn tin riêng (Messenger) cho khách</label>
+      <textarea id="armsg" rows="4" maxlength="2000" placeholder="Ví dụ: Chào {ten}, cảm ơn Quý khách đã quan tâm. FarmBase xin gửi thông tin chi tiết…">${esc(a.message)}</textarea>
+      <label class="check"><input type="checkbox" id="arpub" ${a.public_enabled ? 'checked' : ''}> Trả lời công khai dưới bình luận</label>
+      <textarea id="artxt" rows="2" maxlength="1000" placeholder="Ví dụ: FarmBase đã nhắn tin cho {ten}, Quý khách kiểm tra hộp thư nhé.">${esc(a.public_text)}</textarea>
+      <p class="muted small">Tin nhắn gửi thật tới khách trên Facebook. Facebook chỉ cho nhắn riêng 1 lần cho mỗi bình luận, trong vòng 7 ngày.</p>
+      <div class="actions"><button class="btn ghost" data-x>Đóng</button>${d.can_edit ? '<button class="btn" data-save>Lưu</button>' : ''}</div>`;
+    m.querySelector('[data-x]').onclick = close;
+    const save = m.querySelector('[data-save]');
+    if (save) save.onclick = async () => {
+      save.disabled = true;
+      try {
+        await api(`/api/pages/${encodeURIComponent(pageId)}/autoreply`, { method: 'PUT', body: {
+          enabled: m.querySelector('#aron').checked, message: m.querySelector('#armsg').value,
+          public_enabled: m.querySelector('#arpub').checked, public_text: m.querySelector('#artxt').value } });
+        toast('Đã lưu cài đặt tự trả lời'); close();
+      } catch (e) { toast(e.message); save.disabled = false; }
+    };
+  });
+}
+
+async function viewInbox(q) {
+  const cid = Number(q.get('c')) || 0;
+  layout('hop-thu', 'Hộp thư', 'Tin nhắn Messenger và bình luận của các Fanpage Quý khách quản lý', '<div class="muted">Đang tải…</div>');
+  const params = new URLSearchParams();
+  if (inboxState.kind) params.set('kind', inboxState.kind);
+  if (inboxState.page) params.set('page_id', inboxState.page);
+  if (inboxState.unread) params.set('unread', '1');
+  const [d, { pages }] = await Promise.all([api(`/api/inbox?${params}`), api('/api/pages')]);
+  refreshUnread(d.unread_total);
+  const chips = [['', 'Tất cả'], ['message', 'Tin nhắn'], ['comment', 'Bình luận']]
+    .map(([k, l]) => `<button class="chip ${inboxState.kind === k ? 'on' : ''}" data-kind="${k}">${l}</button>`).join('')
+    + `<button class="chip ${inboxState.unread ? 'on' : ''}" data-unr>Chưa đọc <span>${d.unread_total}</span></button>`
+    + (pages.length > 1 ? `<select id="ipage" class="sm"><option value="">Mọi Fanpage</option>${pages.map((p) => `<option value="${esc(p.id)}" ${inboxState.page === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : '');
+  const list = d.conversations.map((c) => `<a class="conv ${c.id === cid ? 'on' : ''} ${c.unread ? 'new' : ''}" href="#/hop-thu?c=${c.id}">
+      <div class="avatar ini">${esc((c.customer_name || '?').trim().charAt(0).toUpperCase())}</div>
+      <div class="grow"><div class="row between"><b class="ellipsis">${esc(c.customer_name || 'Khách Facebook')}</b><span class="muted small">${fmtTime(c.last_at)}</span></div>
+        <div class="ellipsis small">${c.kind === 'comment' ? '<span class="badge warn">Bình luận</span> ' : ''}${esc(c.last_text || '')}</div>
+        <div class="muted small ellipsis">${esc(c.page_name)}</div></div>
+      ${c.unread ? `<span class="dot" aria-label="${c.unread} chưa đọc">${c.unread}</span>` : ''}</a>`).join('');
+  const empty = `<p class="muted">Chưa có tin nhắn hay bình luận nào. Tin mới sẽ hiện ở đây sau khi webhook được cài đặt (xem mục Fanpage).</p>`;
+  document.getElementById('view').innerHTML = `<div class="chips">${chips}</div>
+    <div class="inbox ${cid ? 'has-conv' : ''}"><div class="card convs">${list || empty}</div><div class="card thread" id="thread">${cid ? '<div class="muted">Đang tải…</div>' : '<p class="muted">Chọn một cuộc trò chuyện để xem và trả lời.</p>'}</div></div>`;
+  document.querySelectorAll('[data-kind]').forEach((b) => (b.onclick = () => { inboxState.kind = b.dataset.kind; viewInbox(q); }));
+  document.querySelector('[data-unr]').onclick = () => { inboxState.unread = !inboxState.unread; viewInbox(q); };
+  const sel = document.getElementById('ipage');
+  if (sel) sel.onchange = () => { inboxState.page = sel.value; viewInbox(q); };
+  if (cid) await loadThread(cid);
+}
+
+async function loadThread(cid, data) {
+  const box = document.getElementById('thread');
+  let d = data;
+  try { d = d || await api(`/api/inbox/${cid}`); } catch (e) { box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+  const c = d.conversation;
+  if (!data) { const a = document.querySelector(`.conv[href="#/hop-thu?c=${cid}"]`); a?.classList.remove('new'); a?.querySelector('.dot')?.remove(); refreshUnread(); }
+  const msgs = d.messages.map((m) => `<div class="msg ${m.direction}">
+      ${CHANNEL[m.channel] ? `<div class="muted small">${CHANNEL[m.channel]}${m.auto ? ' · tự động' : ''}</div>` : (m.auto ? '<div class="muted small">tự động</div>' : '')}
+      <div class="bubble">${esc(m.text || '')}</div>
+      <div class="muted small">${fmtTime(m.created_at)}${m.sent_by_name ? ` · ${esc(m.sent_by_name)}` : ''}
+        ${m.channel === 'comment' ? ` · <button class="link" data-reply="${esc(m.comment_id)}">Trả lời</button>${m.can_private ? ` · <button class="link" data-priv="${esc(m.comment_id)}">Nhắn riêng</button>` : ''}` : ''}</div></div>`).join('');
+  const isMsg = c.kind === 'message';
+  const note = isMsg && !c.can_message ? '<div class="alert warn">Đã quá 24 giờ kể từ tin nhắn cuối của khách. Facebook chỉ cho Trang trả lời trong 24 giờ; chờ khách nhắn lại.</div>' : '';
+  box.innerHTML = `<div class="row between thead"><a class="btn ghost sm only-mobile" href="#/hop-thu">← Danh sách</a>
+      <div class="grow"><b>${esc(c.customer_name || 'Khách Facebook')}</b><div class="muted small">${esc(c.page_name)} · ${isMsg ? 'Tin nhắn Messenger' : 'Bình luận trên bài viết'}</div></div></div>
+    <div class="msgs" id="msgs">${msgs || '<p class="muted">Chưa có nội dung.</p>'}</div>${note}
+    <form id="rf" class="reply">${isMsg ? '' : `<div class="row small" id="rmode"><label class="check"><input type="radio" name="mode" value="public" checked> Trả lời công khai</label><label class="check"><input type="radio" name="mode" value="private"> Nhắn riêng (Messenger)</label><span class="muted" id="rto"></span></div>`}
+      <textarea id="rt" rows="2" maxlength="2000" placeholder="Nhập nội dung trả lời…" ${isMsg && !c.can_message ? 'disabled' : ''}></textarea>
+      <div class="row between"><span class="muted small">Gửi thật tới khách trên Facebook</span><button class="btn" id="rs" ${isMsg && !c.can_message ? 'disabled' : ''}>Gửi</button></div></form>`;
+  const ml = document.getElementById('msgs'); ml.scrollTop = ml.scrollHeight;
+  let commentId = '';
+  const setTarget = (id, mode) => {
+    commentId = id;
+    const r = box.querySelector(`input[name=mode][value=${mode}]`); if (r) r.checked = true;
+    const m = d.messages.find((x) => x.comment_id === id && x.channel === 'comment');
+    document.getElementById('rto').textContent = m ? `→ "${(m.text || '').slice(0, 40)}"` : '';
+    document.getElementById('rt').focus();
+  };
+  box.querySelectorAll('[data-reply]').forEach((b) => (b.onclick = () => setTarget(b.dataset.reply, 'public')));
+  box.querySelectorAll('[data-priv]').forEach((b) => (b.onclick = () => setTarget(b.dataset.priv, 'private')));
+  document.getElementById('rf').onsubmit = async (e) => {
+    e.preventDefault();
+    const text = document.getElementById('rt').value.trim();
+    if (!text) return;
+    const btn = document.getElementById('rs'); btn.disabled = true;
+    const mode = isMsg ? 'message' : box.querySelector('input[name=mode]:checked').value;
+    try {
+      const nd = await api(`/api/inbox/${cid}/reply`, { method: 'POST', body: { text, mode, comment_id: commentId || undefined } });
+      toast('Đã gửi'); loadThread(cid, nd);
+    } catch (err) { toast(err.message); btn.disabled = false; }
+  };
 }
 
 // ---------- Lịch đăng ----------
@@ -775,6 +894,7 @@ const ACTIONS = {
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
   post_cancelled: 'Hủy lịch đăng', post_deleted: 'Xóa bài nháp',
   media_uploaded: 'Tải ảnh/video lên', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
+  inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',
 };
 
@@ -791,6 +911,7 @@ async function viewAudit() {
 function viewAccount() {
   layout('tai-khoan', 'Tài khoản', esc(`${me.email} · ${me.role_label}`), `
     ${me.role === 'owner' ? '<div class="card only-mobile"><h2>Quản trị</h2><div class="row"><a class="btn ghost" href="#/nhan-vien">Nhân viên</a><a class="btn ghost" href="#/nhat-ky">Nhật ký</a></div></div>' : ''}
+    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a></div></div>
     <div class="card"><h2>Đổi mật khẩu</h2>${passwordForm(false)}</div>
     <div class="card"><h2>Cài lên điện thoại</h2><p class="muted small" style="margin-top:0">
       <b>Android:</b> mở trang này bằng Chrome, bấm menu ⋮ rồi "Cài đặt ứng dụng".<br>
@@ -816,6 +937,7 @@ async function render() {
   if (me.must_change_password) { if (path !== 'doi-mat-khau') { location.hash = '#/doi-mat-khau'; return; } return viewForceChange(); }
   try {
     switch (path) {
+      case 'hop-thu': return await viewInbox(q);
       case 'fanpage': return await viewPages(q);
       case 'bai-dang': return await viewPosts(q);
       case 'lich-dang': return await viewCalendar(q);

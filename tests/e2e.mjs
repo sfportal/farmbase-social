@@ -24,16 +24,25 @@ const fakeGraph = createServer(async (req, res) => {
     let raw = '';
     for await (const chunk of req) raw += chunk;
     const params = Object.fromEntries(new URLSearchParams(req.method === 'DELETE' ? u.search : raw));
-    const w = u.pathname.match(/^\/v[\d.]+\/(.+?)(?:\/(feed|photos|videos))?$/);
+    const w = u.pathname.match(/^\/v[\d.]+\/(.+?)(?:\/(feed|photos|videos|messages|subscribed_apps|comments))?$/);
     const pageId = w[1];
     const token = params.access_token;
     delete params.access_token;
     graphWrites.push({ method: req.method, path: u.pathname, params, token });
     if (req.method === 'DELETE') return res.end('{"success":true}');
-    if (token !== `ma-trang-${pageId}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
+    const tokenOk = w[2] === 'comments' ? /^ma-trang-/.test(token || '') : token === `ma-trang-${pageId}`;
+    if (!tokenOk) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
     fbSeq++;
+    if (w[2] === 'subscribed_apps') return res.end('{"success":true}');
+    if (w[2] === 'comments') return res.end(JSON.stringify({ id: `reply${fbSeq}` }));
+    if (w[2] === 'messages') {
+      const rc = JSON.parse(params.recipient);
+      return res.end(JSON.stringify({ recipient_id: rc.id || `psid-${rc.comment_id}`, message_id: `mid.out${fbSeq}` }));
+    }
     return res.end(JSON.stringify(w[2] === 'photos' ? { id: `photo${fbSeq}`, post_id: `${pageId}_p${fbSeq}` } : { id: `${pageId}_f${fbSeq}` }));
   }
+  const who = u.pathname.match(/^\/v[\d.]+\/(\d+)$/);
+  if (who && u.searchParams.get('fields') === 'name') return res.end(JSON.stringify({ id: who[1], name: `Khách ${who[1]}` }));
   const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
   if (!m) { res.statusCode = 404; return res.end('{"error":{"message":"không có","code":100}}'); }
   if (u.searchParams.get('access_token') !== `ma-trang-${m[1]}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
@@ -52,7 +61,7 @@ function sql(command) {
 }
 
 // Làm sạch D1 cục bộ và thêm 2 Fanpage giả để thử phân quyền.
-sql("DELETE FROM social_content; DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
+sql("DELETE FROM social_messages; DELETE FROM social_conversations; DELETE FROM social_settings; DELETE FROM social_content; DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
 const KEY = 'khoa-thu-nghiem-chi-dung-tren-may';
 const encA = await encryptSecret('ma-trang-111', KEY);
 const encB = await encryptSecret('ma-trang-222', KEY);
@@ -169,15 +178,15 @@ r = await owner.req(`/api/users/${ownerId}`, { method: 'PATCH', body: { status: 
 assert.equal(r.status, 400);
 step('không tự hạ quyền hoặc vô hiệu Chủ hệ thống cuối cùng');
 
-// 8. Kết nối Facebook khi chưa có khóa: chuyển về trang hướng dẫn
+// 8. Kết nối Facebook: chuyển sang hộp thoại đăng nhập của Facebook với đúng app và địa chỉ quay về
 r = await owner.req('/api/fb/connect', { redirect: 'manual' });
 assert.equal(r.status, 302);
-assert.match(r.headers.get('location'), /#\/fanpage\?loi=chua-cau-hinh/);
+assert.match(r.headers.get('location'), /^https:\/\/www\.facebook\.com\/v27\.0\/dialog\/oauth\?client_id=1683859133415974&redirect_uri=.*%2Fapi%2Ffb%2Fcallback/);
 r = await new Client().req('/api/fb/connect', { redirect: 'manual' });
 assert.match(r.headers.get('location'), /#\/dang-nhap/);
 r = await owner.req('/api/audit');
 assert.ok(r.data.entries.some((e) => e.action === 'user_created'));
-step('kết nối Facebook báo thiếu cấu hình; nhật ký ghi đủ thao tác');
+step('kết nối Facebook chuyển sang hộp thoại đăng nhập; nhật ký ghi đủ thao tác');
 
 // 9. Bài đăng và số tương tác (đọc từ Facebook giả)
 r = await owner.req('/api/pages/111/posts');
@@ -339,6 +348,98 @@ r = await owner.req('/api/audit');
 assert.ok(['post_published', 'post_scheduled', 'post_cancelled', 'post_rejected', 'post_publish_failed'].every((a) => r.data.entries.some((e) => e.action === a)));
 step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Trang và giờ khi duyệt, quy định và AI viết bài, tải nhiều ảnh và video, hẹn giờ nhiều Trang, hủy lịch, báo lỗi, đúng quyền');
 
+
+// 10b. Hộp thư: webhook (có chữ ký), tin nhắn, bình luận, tự nhắn riêng khi khách bình luận, trả lời, khung 24 giờ
+{
+  const { createHmac } = await import('node:crypto');
+  const APP_SECRET = 'bi-mat-app-chi-dung-khi-thu';
+  const vt = createHmac('sha256', KEY).update('fb-webhook-verify').digest('hex').slice(0, 32);
+  let res = await fetch(`${BASE}/api/fb/webhook?hub.mode=subscribe&hub.verify_token=${vt}&hub.challenge=12345`);
+  assert.equal(res.status, 200); assert.equal(await res.text(), '12345');
+  res = await fetch(`${BASE}/api/fb/webhook?hub.mode=subscribe&hub.verify_token=sai&hub.challenge=1`);
+  assert.equal(res.status, 403);
+  r = await owner.req('/api/fb/status');
+  assert.equal(r.data.webhook_verify_token, vt);
+  const hook = async (body, sign = true) => {
+    const raw = JSON.stringify(body);
+    const headers = { 'content-type': 'application/json' };
+    if (sign) headers['x-hub-signature-256'] = 'sha256=' + createHmac('sha256', APP_SECRET).update(raw).digest('hex');
+    return fetch(`${BASE}/api/fb/webhook`, { method: 'POST', headers, body: raw });
+  };
+  const nowMs = Date.now();
+  const msgEv = { object: 'page', entry: [{ id: '111', time: nowMs, messaging: [{ sender: { id: '900' }, recipient: { id: '111' }, timestamp: nowMs, message: { mid: 'mid.in1', text: 'Cho em hỏi giá dịch vụ' } }] }] };
+  res = await hook(msgEv, false);
+  assert.equal(res.status, 403, 'webhook không chữ ký bị từ chối');
+  res = await hook(msgEv);
+  assert.equal(res.status, 200);
+  await hook(msgEv); // Facebook gửi lại: không ghi trùng
+  r = await owner.req('/api/inbox');
+  assert.equal(r.data.conversations.length, 1);
+  const conv = r.data.conversations[0];
+  assert.equal(conv.customer_name, 'Khách 900');
+  assert.equal(conv.unread, 1); assert.equal(conv.can_message, true); assert.equal(r.data.unread_total, 1);
+  r = await viewer.req('/api/inbox');
+  assert.equal(r.data.conversations.length, 0, 'biên tập Trang 222 không thấy hộp thư Trang 111');
+  r = await viewer.req(`/api/inbox/${conv.id}`);
+  assert.equal(r.status, 404);
+  // Trả lời tin nhắn
+  graphWrites.length = 0;
+  r = await owner.req(`/api/inbox/${conv.id}/reply`, { method: 'POST', body: { text: 'Chào anh, em gửi báo giá ạ' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.messages.length, 2); assert.equal(r.data.conversation.unread, 0);
+  assert.equal(graphWrites[0].path, '/v27.0/111/messages');
+  assert.deepEqual(JSON.parse(graphWrites[0].params.recipient), { id: '900' });
+  assert.equal(graphWrites[0].params.messaging_type, 'RESPONSE');
+  // Tin echo của chính tin vừa gửi không ghi trùng; tin nhân viên gửi từ Facebook thì ghi vào
+  await hook({ object: 'page', entry: [{ id: '111', messaging: [{ sender: { id: '111' }, recipient: { id: '900' }, timestamp: nowMs + 1000, message: { mid: 'mid.out' + fbSeq, is_echo: true, text: 'Chào anh, em gửi báo giá ạ' } }] }] });
+  await hook({ object: 'page', entry: [{ id: '111', messaging: [{ sender: { id: '111' }, recipient: { id: '900' }, timestamp: nowMs + 2000, message: { mid: 'mid.fb1', is_echo: true, text: 'Nhắn từ Facebook' } }] }] });
+  r = await owner.req(`/api/inbox/${conv.id}`);
+  assert.equal(r.data.messages.length, 3);
+  // Quá 24 giờ: không cho gửi
+  sql(`UPDATE social_conversations SET last_in_at = ${Math.floor(nowMs / 1000) - 90000} WHERE id = ${conv.id}`);
+  r = await owner.req(`/api/inbox/${conv.id}/reply`, { method: 'POST', body: { text: 'Còn đó không ạ' } });
+  assert.equal(r.status, 400); assert.equal(r.data.code, 'window_closed');
+
+  // Cài tự trả lời (chỉ Chủ hệ thống, Quản lý)
+  r = await viewer.req('/api/pages/222/autoreply', { method: 'PUT', body: { enabled: true, message: 'x' } });
+  assert.equal(r.status, 403);
+  r = await owner.req('/api/pages/111/autoreply', { method: 'PUT', body: { enabled: true, message: '' } });
+  assert.equal(r.status, 400);
+  r = await owner.req('/api/pages/111/autoreply', { method: 'PUT', body: { enabled: true, message: 'Chào {ten}, FarmBase đã nhận câu hỏi', public_enabled: true, public_text: 'Đã nhắn tin cho {ten} ạ' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // Khách bình luận: tự nhắn riêng + trả lời công khai, chỉ 1 lần cho mỗi bài
+  graphWrites.length = 0;
+  const cmt = (cid, text, from = { id: '777', name: 'Chị Lan' }) => ({ object: 'page', entry: [{ id: '111', changes: [{ field: 'feed', value: { item: 'comment', verb: 'add', comment_id: cid, post_id: '111_1', from, message: text, created_time: Math.floor(nowMs / 1000) } }] }] });
+  await hook(cmt('111_1_c1', 'Giá bao nhiêu vậy?'));
+  assert.equal(graphWrites.length, 2, JSON.stringify(graphWrites));
+  assert.equal(graphWrites[0].path, '/v27.0/111_1_c1/comments'); assert.equal(graphWrites[0].params.message, 'Đã nhắn tin cho Chị Lan ạ');
+  assert.equal(graphWrites[1].path, '/v27.0/111/messages');
+  assert.deepEqual(JSON.parse(graphWrites[1].params.recipient), { comment_id: '111_1_c1' });
+  assert.equal(JSON.parse(graphWrites[1].params.message).text, 'Chào Chị Lan, FarmBase đã nhận câu hỏi');
+  await hook(cmt('111_1_c2', 'Còn hàng không?'));
+  await hook(cmt('111_1_c9', 'Trang tự bình luận', { id: '111', name: 'Fanpage Thử A' }));
+  assert.equal(graphWrites.length, 2, 'không tự trả lời lần 2 cùng bài, bỏ qua bình luận của chính Trang');
+  r = await owner.req('/api/inbox?kind=comment');
+  assert.equal(r.data.conversations.length, 1);
+  const cconv = r.data.conversations[0];
+  r = await owner.req(`/api/inbox/${cconv.id}`);
+  assert.equal(r.data.messages.length, 4);
+  assert.equal(r.data.messages.find((m) => m.comment_id === '111_1_c1' && m.channel === 'comment').can_private, false);
+  assert.equal(r.data.messages.find((m) => m.comment_id === '111_1_c2').can_private, true);
+  // Nhân viên trả lời công khai và nhắn riêng bình luận thứ 2
+  graphWrites.length = 0;
+  r = await owner.req(`/api/inbox/${cconv.id}/reply`, { method: 'POST', body: { text: 'Dạ còn ạ', mode: 'public', comment_id: '111_1_c2' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req(`/api/inbox/${cconv.id}/reply`, { method: 'POST', body: { text: 'Em gửi chị chi tiết', mode: 'private', comment_id: '111_1_c2' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(graphWrites.map((g) => g.path), ['/v27.0/111_1_c2/comments', '/v27.0/111/messages']);
+  r = await owner.req('/api/inbox?kind=message');
+  assert.ok(r.data.conversations.some((c) => c.customer_id === 'psid-111_1_c1'), 'tin nhắn riêng tạo cuộc trò chuyện Messenger');
+  r = await owner.req('/api/audit');
+  assert.ok(['inbox_replied', 'autoreply_updated'].every((a) => r.data.entries.some((e) => e.action === a)));
+  step('hộp thư: webhook có chữ ký, chống trùng, tin nhắn và bình luận, tự nhắn riêng khi khách bình luận, trả lời, khung 24 giờ, đúng quyền');
+}
+
 // 11. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -358,7 +459,7 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
     await page.waitForTimeout(['bai-dang', 'lich-dang'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -387,6 +488,17 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.click('[data-c-approve]');
   await page.waitForSelector('#apf');
   await page.screenshot({ path: `test-output/${label}-duyet-chon-trang.png` });
+  await page.keyboard.press('Escape');
+  await page.goto(`${BASE}/#/hop-thu`);
+  await page.waitForSelector('.conv');
+  await page.click('.conv');
+  await page.waitForSelector('#rf');
+  await page.screenshot({ path: `test-output/${label}-hop-thu-tro-chuyen.png` });
+  await page.goto(`${BASE}/#/fanpage`);
+  await page.waitForSelector('[data-auto]');
+  await page.click('[data-auto]');
+  await page.waitForSelector('#armsg');
+  await page.screenshot({ path: `test-output/${label}-tu-tra-loi.png` });
   await page.keyboard.press('Escape');
   await page.goto(`${BASE}/#/nhan-vien`);
   await page.click('#add');

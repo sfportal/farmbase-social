@@ -47,6 +47,8 @@ Trong app "FarmBase Social" (ID 1683859133415974):
    Trang **Fanpage** trong hệ thống hiện đúng địa chỉ cần chép.
 3. Ở **Cài đặt → Thông tin cơ bản**, điền **App Domains** là tên miền của trang.
 
+4. **Webhook (hộp thư):** trong trường hợp sử dụng Messenger và Page, mục **Webhooks**, điền Callback URL `https://<tên miền>/api/fb/webhook` và Verify token. Cả hai hiện ở trang **Fanpage** của hệ thống (mục "Cài đặt nhận tin nhắn, bình luận", chỉ Chủ hệ thống xem được). Đăng ký trường `messages`, `message_echoes` (Messenger) và `feed` (Page). Sau đó bấm **Cập nhật** ở từng Trang để Trang gửi tin về hệ thống.
+
 ## 5. Dùng lần đầu
 
 1. Mở trang, đăng nhập bằng `ADMIN_EMAIL` và mật khẩu tạm, đặt mật khẩu mới.

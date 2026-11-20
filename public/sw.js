@@ -1,5 +1,5 @@
 // Service worker: lưu sẵn khung giao diện để mở nhanh như app; API luôn lấy mới từ máy chủ.
-const CACHE = 'fbs-shell-v6';
+const CACHE = 'fbs-shell-v7';
 const SHELL = ['/', '/app.css', '/app.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
