@@ -18,7 +18,7 @@
     "ADMIN_INITIAL_PASSWORD": "MatKhauTam-2026",
     "TOKEN_KEY": "khoa-thu-nghiem-chi-dung-tren-may",
     "FB_APP_ID": "1683859133415974",
-    "FB_APP_SECRET": "",
+    "FB_APP_SECRET": "bi-mat-app-chi-dung-khi-thu",
     "FB_API_VERSION": "v27.0",
     "AI_FAKE_REPLY": "Bài AI viết thử",
     "FB_GRAPH_BASE": "http://localhost:8791"

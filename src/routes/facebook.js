@@ -3,6 +3,7 @@ import { encryptSecret, decryptSecret, randomToken } from '../lib/crypto.js';
 import { HttpError, json, now } from '../lib/http.js';
 import { requireRole, allowedPageIds } from '../lib/auth.js';
 import { audit } from '../lib/audit.js';
+import { subscribePage, verifyToken } from './inbox.js';
 
 // Quyền đã thêm trong app "FarmBase Social". Đổi bằng biến FB_SCOPES nếu cần.
 const DEFAULT_SCOPES = [
@@ -42,6 +43,8 @@ export async function fbStatus(request, env, user) {
     redirect_uri: redirectUri(request),
     scopes: (env.FB_SCOPES || DEFAULT_SCOPES).split(','),
     config_id: env.FB_CONFIG_ID || null,
+    webhook_url: `${new URL(request.url).origin}/api/fb/webhook`,
+    webhook_verify_token: await verifyToken(env),
   });
 }
 
@@ -127,7 +130,12 @@ export async function fbCallback(request, env, user) {
       );
     }
     if (stmts.length) await env.DB.batch(stmts);
-    await audit(env, request, user.id, 'pages_connected', null, { pages: pages.map((p) => ({ id: p.id, name: p.name })) });
+    // Đăng ký nhận tin nhắn, bình luận mới qua webhook cho từng Trang (lỗi thì bỏ qua, bấm Cập nhật để thử lại).
+    const subFailed = [];
+    for (const p of pages) {
+      try { await subscribePage(env, p.id, p.access_token); } catch (e) { subFailed.push({ id: p.id, message: e.message }); }
+    }
+    await audit(env, request, user.id, 'pages_connected', null, { pages: pages.map((p) => ({ id: p.id, name: p.name })), webhook_failed: subFailed });
     return back(`ket-noi=${pages.length}`);
   } catch (e) {
     await audit(env, request, user.id, 'pages_connect_failed', null, { message: e.message });
@@ -156,6 +164,7 @@ export async function refreshPage(request, env, user, pageId) {
   try {
     const token = await decryptSecret(page.access_token_enc, env.TOKEN_KEY);
     const d = await graph(env, pageId, { access_token: token, fields: 'id,name,category,picture{url},fan_count,followers_count' });
+    try { await subscribePage(env, pageId, token); } catch (e) { console.error('subscribe', e.message); }
     await env.DB.prepare(
       "UPDATE social_pages SET name = ?, category = ?, picture_url = ?, fan_count = ?, followers_count = ?, stats_at = ?, status = 'active', last_error = NULL, updated_at = ? WHERE id = ?"
     ).bind(d.name, d.category || null, d.picture?.data?.url || null, d.fan_count ?? null, d.followers_count ?? null, t, t, pageId).run();

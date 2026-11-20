@@ -8,9 +8,10 @@ import * as posts from './routes/posts.js';
 import * as content from './routes/content.js';
 import * as media from './routes/media.js';
 import * as writing from './routes/writing.js';
+import * as inbox from './routes/inbox.js';
 
 // [method, mẫu đường dẫn, hàm, tùy chọn]
-// public: không cần đăng nhập · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
+// public: không cần đăng nhập · external: yêu cầu từ máy chủ khác (Facebook), bỏ kiểm tra cùng nguồn vì đã kiểm tra chữ ký · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
 const ROUTES = [
   ['GET', '/api/health', () => json({ ok: true, service: 'farmbase-social' }), { public: true }],
   ['POST', '/api/auth/login', auth.login, { public: true }],
@@ -43,6 +44,13 @@ const ROUTES = [
   ['PUT', '/api/rules', writing.saveRules],
   ['POST', '/api/ai/write', writing.aiWrite],
   ['GET', '/api/fb/status', fb.fbStatus],
+  ['GET', '/api/fb/webhook', inbox.webhookVerify, { public: true }],
+  ['POST', '/api/fb/webhook', inbox.webhookReceive, { public: true, external: true }],
+  ['GET', '/api/inbox', inbox.listInbox],
+  ['GET', '/api/inbox/:id', inbox.readConversation],
+  ['POST', '/api/inbox/:id/reply', inbox.replyConversation],
+  ['GET', '/api/pages/:id/autoreply', inbox.readAutoReply],
+  ['PUT', '/api/pages/:id/autoreply', inbox.saveAutoReply],
   ['GET', '/api/fb/connect', fb.fbConnect, { nav: true }],
   ['GET', '/api/fb/callback', fb.fbCallback, { nav: true }],
 ];
@@ -83,7 +91,7 @@ async function handleApi(request, env) {
   if (!found) throw new HttpError(404, 'Không tìm thấy', 'not_found');
   const { handler, opts, params } = found;
 
-  if (request.method !== 'GET' && !sameOrigin(request)) {
+  if (request.method !== 'GET' && !opts.external && !sameOrigin(request)) {
     throw new HttpError(403, 'Yêu cầu không hợp lệ', 'bad_origin');
   }
 

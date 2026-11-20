@@ -14,7 +14,8 @@ Chạy trên Cloudflare Workers + D1 (gói miễn phí; dùng chung D1 `farmbase
 | 1 | Đăng nhập, vai trò, đổi mật khẩu lần đầu, khóa khi nhập sai, quản lý nhân viên, giao Fanpage, kết nối Fanpage bằng đăng nhập Facebook, nhật ký | Xong |
 | 2 | Xem bài đăng và số tương tác từng bài theo Fanpage | Xong |
 | 2 | Lịch nội dung, gửi duyệt, duyệt, đăng ngay hoặc hẹn giờ bằng lịch của Facebook | Xong |
-| 3 | Webhook, hộp thư chung, trả lời bình luận và tin nhắn tự động, AI | Chưa làm |
+| 3 | Webhook, hộp thư chung (tin nhắn, bình luận), trả lời trong hệ thống, tự nhắn riêng và trả lời công khai khi khách bình luận | Xong |
+| 3 | AI gợi ý câu trả lời | Chưa làm |
 | 4 | CRM mini, ghi đơn, kho kiến thức AI, báo cáo tuần | Chưa làm |
 
 ## API
@@ -47,6 +48,11 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | GET | `/api/media/file/:key` (công khai, tên ngẫu nhiên, để Facebook tải về) | Công khai |
 | GET, PUT | `/api/rules`: quy định đăng bài (văn phong cho AI) | Xem: mọi người · Sửa: Chủ hệ thống, Quản lý |
 | POST | `/api/ai/write` `{ brief, current?, length?, page_ids? }`: AI viết bài theo quy định (Workers AI `AI`) | Mọi vai trò trừ Chăm sóc khách hàng |
+| GET, POST | `/api/fb/webhook`: Facebook xác minh (verify token suy ra từ `TOKEN_KEY`) và gửi tin nhắn, bình luận mới (kiểm tra chữ ký bằng `FB_APP_SECRET`) | Công khai |
+| GET | `/api/inbox?kind=&page_id=&unread=1&before=`: danh sách cuộc trò chuyện theo Trang được giao | Mọi vai trò |
+| GET | `/api/inbox/:id`: tin trong cuộc trò chuyện, đánh dấu đã đọc | Mọi vai trò |
+| POST | `/api/inbox/:id/reply` `{ text, mode: message\|public\|private, comment_id? }`: trả lời tin nhắn (trong 24 giờ), trả lời công khai hoặc nhắn riêng bình luận (1 lần, trong 7 ngày) | Mọi vai trò |
+| GET, PUT | `/api/pages/:id/autoreply` `{ enabled, message, public_enabled, public_text }`: tự trả lời khi khách bình luận lần đầu trên mỗi bài, `{ten}` chèn tên khách | Xem: mọi vai trò; sửa: Chủ hệ thống, Quản lý |
 | GET | `/api/fb/status`, `/api/fb/connect`, `/api/fb/callback` | Chủ hệ thống |
 
 ## Chạy thử trên máy
