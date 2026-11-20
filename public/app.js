@@ -96,6 +96,7 @@ const I = {
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5 6.5-5s5.7 1.5 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.3 0 4 1.2 4.6 3.5"/>',
   log: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/>',
   me: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.2-6 8-6s7 2 8 6"/>',
+  ads: '<path d="M3 10v4l11 5V5z"/><path d="M14 8a4 4 0 0 1 0 8M6 14.5 7.5 20h3l-1.3-4.3"/>',
   rule: '<path d="M5 3h11l3 3v15H5z"/><path d="m8.5 12 2 2 4-4M8.5 17h7"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
@@ -110,6 +111,7 @@ function navItems() {
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
   ];
+  if (me.role === 'owner' || me.role === 'manager') items.push({ r: 'quang-cao', label: 'Quảng cáo', ic: 'ads' });
   if (me.role === 'owner') {
     items.push({ r: 'nhan-vien', label: 'Nhân viên', ic: 'users' });
     items.push({ r: 'nhat-ky', label: 'Nhật ký', ic: 'log' });
@@ -245,6 +247,7 @@ async function viewHome() {
         <li><b>Đã có:</b> xem bài đăng và số tương tác từng bài theo Fanpage (mục Bài đăng).</li>
         <li><b>Đã có:</b> lịch đăng bài, duyệt bài, đăng ngay hoặc hẹn giờ lên Fanpage (mục Lịch đăng).</li>
         <li><b>Đã có:</b> hộp thư chung tin nhắn và bình luận, trả lời ngay trong hệ thống, tự nhắn tin khi khách bình luận (mục Hộp thư).</li>
+        <li><b>Đã có:</b> xem chiến dịch quảng cáo, chi tiêu, tin nhắn và chi phí mỗi kết quả (mục Quảng cáo).</li>
         <li><b>Giai đoạn 4:</b> CRM mini, ghi đơn, AI bán hàng, báo cáo tuần.</li>
       </ul></div>`;
 }
@@ -824,6 +827,90 @@ async function viewPosts(q) {
   await loadPosts();
 }
 
+// ---------- Quảng cáo (chỉ xem) ----------
+const ADS_PRESETS = [['today', 'Hôm nay'], ['yesterday', 'Hôm qua'], ['last_7d', '7 ngày qua'], ['last_30d', '30 ngày qua'], ['this_month', 'Tháng này'], ['last_month', 'Tháng trước']];
+const CAMP_STATUS = {
+  ACTIVE: ['Đang chạy', ''], PAUSED: ['Tạm dừng', 'off'], CAMPAIGN_PAUSED: ['Tạm dừng', 'off'], ARCHIVED: ['Lưu trữ', 'off'], DELETED: ['Đã xóa', 'off'],
+  IN_PROCESS: ['Đang xử lý', 'warn'], WITH_ISSUES: ['Có vấn đề', 'err'], PENDING_REVIEW: ['Chờ duyệt', 'warn'], DISAPPROVED: ['Bị từ chối', 'err'], PENDING_BILLING_INFO: ['Thiếu thanh toán', 'err'],
+};
+const ACC_STATUS = { active: ['Đang hoạt động', ''], disabled: ['Bị vô hiệu hóa', 'err'], unsettled: ['Chưa thanh toán', 'err'], pending_review: ['Đang xét duyệt', 'warn'], grace_period: ['Gia hạn thanh toán', 'warn'], closed: ['Đã đóng', 'off'] };
+const OBJECTIVE = {
+  OUTCOME_ENGAGEMENT: 'Tương tác', OUTCOME_TRAFFIC: 'Lưu lượng truy cập', OUTCOME_AWARENESS: 'Nhận biết', OUTCOME_LEADS: 'Khách hàng tiềm năng',
+  OUTCOME_SALES: 'Doanh số', OUTCOME_APP_PROMOTION: 'Quảng bá ứng dụng', MESSAGES: 'Tin nhắn', POST_ENGAGEMENT: 'Tương tác bài viết', LINK_CLICKS: 'Lượt nhấp',
+};
+const adsState = { account: '', preset: 'last_7d', accounts: [] };
+const fmtMoney = (v, cur) => (v === null || v === undefined ? '–' : Number(v).toLocaleString('vi-VN', { maximumFractionDigits: cur === 'VND' ? 0 : 2 }) + (cur === 'VND' ? ' ₫' : ` ${cur}`));
+
+async function viewAds() {
+  layout('quang-cao', 'Quảng cáo', 'Chiến dịch, chi tiêu và kết quả của các tài khoản quảng cáo Facebook', '<div class="muted">Đang tải…</div>');
+  const v = document.getElementById('view');
+  let d;
+  try { d = await api('/api/ads/accounts', { quiet: true }); } catch (e) {
+    v.innerHTML = `<div class="card"><h2>Chưa xem được quảng cáo</h2><p class="muted">${esc(e.message)}</p>
+      ${me.role === 'owner' ? '<a class="btn" href="#/fanpage">Đến mục Fanpage</a>' : ''}</div>`;
+    return;
+  }
+  adsState.accounts = d.accounts;
+  if (!d.accounts.length) {
+    v.innerHTML = `<div class="card"><p class="muted" style="margin:0">Tài khoản Facebook đã kết nối chưa có tài khoản quảng cáo nào, hoặc chưa đồng ý quyền xem quảng cáo khi đăng nhập. Chủ hệ thống có thể bấm "Kết nối Fanpage" ở mục Fanpage để đăng nhập lại và chọn tài khoản quảng cáo.</p></div>`;
+    return;
+  }
+  if (!d.accounts.some((a) => a.id === adsState.account)) adsState.account = (d.accounts.find((a) => a.status === 'active') || d.accounts[0]).id;
+  v.innerHTML = `
+    <div class="card filters">
+      <div><label for="acc">Tài khoản quảng cáo</label><select id="acc">${d.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.business ? ` (${esc(a.business)})` : ''}</option>`).join('')}</select></div>
+      <div><label for="pre">Thời gian</label><select id="pre">${ADS_PRESETS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+      <div class="end"><button class="btn ghost" id="reload">Tải lại</button></div>
+    </div>
+    <div id="ads"></div>`;
+  const acc = document.getElementById('acc');
+  const pre = document.getElementById('pre');
+  acc.value = adsState.account; pre.value = adsState.preset;
+  acc.onchange = () => { adsState.account = acc.value; loadAds(); };
+  pre.onchange = () => { adsState.preset = pre.value; loadAds(); };
+  document.getElementById('reload').onclick = loadAds;
+  await loadAds();
+}
+
+async function loadAds() {
+  const box = document.getElementById('ads');
+  box.innerHTML = '<div class="muted">Đang tải số liệu từ Facebook…</div>';
+  let d;
+  try { d = await api(`/api/ads/accounts/${encodeURIComponent(adsState.account)}/campaigns?preset=${adsState.preset}`, { quiet: true }); } catch (e) {
+    box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return;
+  }
+  const cur = d.account.currency;
+  const t = d.totals;
+  const info = adsState.accounts.find((a) => a.id === d.account.id) || {};
+  const [al, ac] = ACC_STATUS[d.account.status] || ['Khác', 'off'];
+  const rows = d.campaigns.map((c) => {
+    const [sl, sc] = CAMP_STATUS[c.status] || [c.status, 'off'];
+    const i = c.insights;
+    const budget = c.daily_budget !== null ? `${fmtMoney(c.daily_budget, cur)}/ngày` : c.lifetime_budget !== null ? `${fmtMoney(c.lifetime_budget, cur)} trọn đời` : 'Theo nhóm quảng cáo';
+    return `<tr>
+      <td><b><a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.name)}</a></b><div class="muted small">${esc(OBJECTIVE[c.objective] || c.objective || '')}</div></td>
+      <td><span class="badge ${sc}">${esc(sl)}</span></td>
+      <td data-l="Ngân sách">${budget}</td>
+      <td data-l="Chi tiêu"><b>${c.has_data ? fmtMoney(i.spend, cur) : '–'}</b></td>
+      <td data-l="Hiển thị">${c.has_data ? fmtNum(i.impressions) : '–'}</td>
+      <td data-l="Lượt nhấp">${c.has_data ? fmtNum(i.clicks) : '–'}</td>
+      <td data-l="Tin nhắn">${c.has_data ? fmtNum(i.messages) : '–'}</td>
+      <td data-l="Chi phí/tin nhắn">${i.cost_per_message !== null ? fmtMoney(i.cost_per_message, cur) : '–'}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="row between ads-head"><div><span class="badge ${ac}">${esc(al)}</span> <span class="muted small">Đã chi từ trước tới nay: ${fmtMoney(info.amount_spent, cur)}</span></div>
+      ${info.link ? `<a class="btn ghost sm" href="${esc(info.link)}" target="_blank" rel="noopener">Mở trong Trình quản lý quảng cáo</a>` : ''}</div>
+    <div class="grid stats4">
+      <div class="card stat"><div class="muted small">Chi tiêu</div><div class="n">${fmtMoney(t.spend, cur)}</div></div>
+      <div class="card stat"><div class="muted small">Tin nhắn mới</div><div class="n">${fmtNum(t.messages)}</div><div class="muted small">${t.cost_per_message !== null ? `${fmtMoney(t.cost_per_message, cur)} mỗi tin nhắn` : '&nbsp;'}</div></div>
+      <div class="card stat"><div class="muted small">Người tiếp cận</div><div class="n">${fmtNum(t.reach)}</div><div class="muted small">${fmtNum(t.impressions)} lượt hiển thị</div></div>
+      <div class="card stat"><div class="muted small">Lượt nhấp</div><div class="n">${fmtNum(t.clicks)}</div><div class="muted small">${t.ctr !== null ? `Tỷ lệ nhấp ${t.ctr.toLocaleString('vi-VN', { maximumFractionDigits: 2 })}%` : '&nbsp;'}</div></div>
+    </div>
+    <p class="muted small">Số liệu lấy trực tiếp từ Facebook lúc tải trang, có thể chênh nhẹ so với Trình quản lý quảng cáo trong vài giờ gần nhất. Ở đây chỉ xem; muốn bật, tắt hay sửa chiến dịch, bấm tên chiến dịch để mở trên Facebook.</p>
+    <div class="card">${rows ? `<table class="cards ads"><thead><tr><th>Chiến dịch</th><th>Trạng thái</th><th>Ngân sách</th><th>Chi tiêu</th><th>Hiển thị</th><th>Lượt nhấp</th><th>Tin nhắn</th><th>Chi phí/tin nhắn</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="muted" style="margin:0">Tài khoản này chưa có chiến dịch nào.</p>'}</div>`;
+}
+
 // ---------- Nhân viên ----------
 async function viewUsers() {
   layout('nhan-vien', 'Nhân viên', 'Cấp tài khoản và giao Fanpage cho từng người', '<div class="muted">Đang tải…</div>', '<button class="btn" id="add">Thêm nhân viên</button>');
@@ -925,7 +1012,7 @@ async function viewAudit() {
 function viewAccount() {
   layout('tai-khoan', 'Tài khoản', esc(`${me.email} · ${me.role_label}`), `
     ${me.role === 'owner' ? '<div class="card only-mobile"><h2>Quản trị</h2><div class="row"><a class="btn ghost" href="#/nhan-vien">Nhân viên</a><a class="btn ghost" href="#/nhat-ky">Nhật ký</a></div></div>' : ''}
-    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a></div></div>
+    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a>${me.role === 'owner' || me.role === 'manager' ? '<a class="btn ghost" href="#/quang-cao">Quảng cáo</a>' : ''}</div></div>
     <div class="card"><h2>Đổi mật khẩu</h2>${passwordForm(false)}</div>
     <div class="card"><h2>Cài lên điện thoại</h2><p class="muted small" style="margin-top:0">
       <b>Android:</b> mở trang này bằng Chrome, bấm menu ⋮ rồi "Cài đặt ứng dụng".<br>
@@ -954,6 +1041,7 @@ async function render() {
       case 'hop-thu': return await viewInbox(q);
       case 'fanpage': return await viewPages(q);
       case 'bai-dang': return await viewPosts(q);
+      case 'quang-cao': return me.role === 'owner' || me.role === 'manager' ? await viewAds() : go('tong-quan');
       case 'lich-dang': return await viewCalendar(q);
       case 'quy-dinh': return await viewRules();
       case 'nhan-vien': return me.role === 'owner' ? await viewUsers() : go('tong-quan');

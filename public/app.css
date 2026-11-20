@@ -207,3 +207,11 @@ details.hook .secret { font-size: 13px; letter-spacing: 0; overflow-wrap: anywhe
 .cust { display: flex; gap: 12px; align-items: center; }
 .avatar.big { width: 52px; height: 52px; font-size: 20px; display: grid; place-items: center; font-weight: 700; }
 .thread .thead > .only-mobile { justify-self: start; }
+
+/* Quảng cáo */
+.ads-head { flex-wrap: wrap; margin-bottom: 12px; }
+table.ads td:nth-child(n+3), table.ads th:nth-child(n+3) { text-align: right; white-space: nowrap; }
+@media (max-width: 640px) {
+  table.ads td:nth-child(n+3) { text-align: left; display: flex; justify-content: space-between; gap: 12px; }
+  table.ads td[data-l]::before { content: attr(data-l); color: var(--muted); font-size: 13px; }
+}
