@@ -24,7 +24,8 @@
   // Workers AI: viết bài theo quy định đăng bài (gói miễn phí 10.000 neuron mỗi ngày)
   "ai": { "binding": "AI" },
   "vars": {
-    "FB_APP_ID": "1693553165520150",
+    "FB_APP_ID": "1683859133415974",
+    "FB_CONFIG_ID": "1913849379780958",
     "FB_API_VERSION": "v27.0"
   },
   // Biến bí mật đặt trên Cloudflare, không có trong repo: ADMIN_EMAIL, ADMIN_INITIAL_PASSWORD, TOKEN_KEY, FB_APP_SECRET
