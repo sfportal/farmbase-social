@@ -148,13 +148,13 @@ async function fillProfile(env, conv) {
   try {
     const p = await graph(env, conv.customer_id, { fields: 'name,first_name,last_name,profile_pic', access_token: await pageToken(env, conv.page_id) });
     const name = p.name || [p.last_name, p.first_name].filter(Boolean).join(' ') || null;
-    if (!name && !p.profile_pic) return false;
+    if (!name && !p.profile_pic) return 'Facebook không trả tên, ảnh của khách';
     await env.DB.prepare('UPDATE social_conversations SET customer_name = COALESCE(?, customer_name), customer_pic = COALESCE(?, customer_pic) WHERE id = ?')
       .bind(name, p.profile_pic || null, conv.id).run();
     conv.customer_name = name || conv.customer_name;
     conv.customer_pic = p.profile_pic || conv.customer_pic;
-    return true;
-  } catch { return false; }
+    return null;
+  } catch (e) { return e.message || 'Lỗi khi lấy thông tin khách'; }
 }
 
 // Liên kết mở khách trên Facebook: Facebook không cho lấy trang cá nhân qua API (id khách chỉ dùng trong app),
@@ -281,7 +281,7 @@ export async function readConversation(request, env, user, id) {
      WHERE m.conversation_id = ? ORDER BY m.created_at DESC, m.id DESC LIMIT 200`
   ).bind(c.id).all();
   if (c.unread) await env.DB.prepare('UPDATE social_conversations SET unread = 0 WHERE id = ?').bind(c.id).run();
-  if (c.kind === 'message' && (!c.customer_name || !c.customer_pic)) await fillProfile(env, c);
+  const profileError = c.kind === 'message' && (!c.customer_name || !c.customer_pic) ? await fillProfile(env, c) : null;
   const lastComment = results.find((m) => m.channel === 'comment');
   const counts = { in: results.filter((m) => m.direction === 'in').length, out: results.filter((m) => m.direction === 'out').length };
   const msgs = results.reverse().map((m) => ({
@@ -290,7 +290,7 @@ export async function readConversation(request, env, user, id) {
     // Nhắn riêng được khi bình luận chưa quá 7 ngày và chưa nhắn riêng lần nào.
     can_private: m.channel === 'comment' && now() - m.created_at < 7 * DAY && !results.some((x) => x.channel === 'private_reply' && x.comment_id === m.comment_id),
   }));
-  return json({ conversation: { ...shapeConv(c), unread: 0, links: fbLinks(c, lastComment), counts }, messages: msgs });
+  return json({ conversation: { ...shapeConv(c), unread: 0, links: fbLinks(c, lastComment), counts, profile_error: user.role === 'owner' ? profileError : null }, messages: msgs });
 }
 
 // POST /api/inbox/:id/reply { text, mode: 'message' | 'public' | 'private', comment_id? }
