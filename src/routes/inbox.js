@@ -143,6 +143,34 @@ async function upsertConversation(env, pageId, kind, customerId, name, text, at,
   return env.DB.prepare('SELECT * FROM social_conversations WHERE page_id = ? AND kind = ? AND customer_id = ?').bind(pageId, kind, customerId).first();
 }
 
+// Lấy tên, ảnh đại diện khách Messenger (cần tính năng Business Asset User Profile Access). Lỗi thì bỏ qua.
+async function fillProfile(env, conv) {
+  try {
+    const p = await graph(env, conv.customer_id, { fields: 'name,first_name,last_name,profile_pic', access_token: await pageToken(env, conv.page_id) });
+    const name = p.name || [p.last_name, p.first_name].filter(Boolean).join(' ') || null;
+    if (!name && !p.profile_pic) return false;
+    await env.DB.prepare('UPDATE social_conversations SET customer_name = COALESCE(?, customer_name), customer_pic = COALESCE(?, customer_pic) WHERE id = ?')
+      .bind(name, p.profile_pic || null, conv.id).run();
+    conv.customer_name = name || conv.customer_name;
+    conv.customer_pic = p.profile_pic || conv.customer_pic;
+    return true;
+  } catch { return false; }
+}
+
+// Liên kết mở khách trên Facebook: Facebook không cho lấy trang cá nhân qua API (id khách chỉ dùng trong app),
+// nên tin nhắn mở trong hộp thư Meta Business Suite, bình luận mở đúng bình luận trên bài (bấm tên khách ở đó để xem trang cá nhân).
+function fbLinks(c, lastComment) {
+  const links = {};
+  if (c.kind === 'message') {
+    links.inbox = `https://business.facebook.com/latest/inbox/all?asset_id=${encodeURIComponent(c.page_id)}&mailbox_id=${encodeURIComponent(c.page_id)}&selected_item_id=${encodeURIComponent(c.customer_id)}&thread_type=FB_MESSAGE`;
+  } else if (lastComment?.post_id) {
+    const [pagePart, postPart] = String(lastComment.post_id).split('_');
+    const cPart = String(lastComment.comment_id || '').split('_').pop();
+    links.comment = `https://www.facebook.com/${encodeURIComponent(pagePart)}/posts/${encodeURIComponent(postPart || pagePart)}${cPart ? `?comment_id=${encodeURIComponent(cPart)}` : ''}`;
+  }
+  return links;
+}
+
 const attachText = (m) => (m.attachments?.length ? `[${m.attachments.map((a) => ({ image: 'Ảnh', video: 'Video', audio: 'Âm thanh', file: 'Tệp' }[a.type] || 'Đính kèm')).join(', ')}]` : '');
 
 async function onMessage(env, pageId, ev) {
@@ -154,14 +182,8 @@ async function onMessage(env, pageId, ev) {
   if (await env.DB.prepare('SELECT 1 FROM social_messages WHERE fb_id = ?').bind(m.mid).first()) return; // đã có (Facebook gửi lại hoặc tin do hệ thống gửi)
   const text = [m.text, attachText(m)].filter(Boolean).join(' ');
   const at = ev.timestamp ? Math.floor(ev.timestamp / 1000) : now();
-  let name = null;
-  if (!echo) {
-    const known = await env.DB.prepare("SELECT customer_name FROM social_conversations WHERE page_id = ? AND kind = 'message' AND customer_id = ?").bind(pageId, customerId).first();
-    if (!known?.customer_name) {
-      try { name = (await graph(env, customerId, { fields: 'name', access_token: await pageToken(env, pageId) })).name || null; } catch { /* Facebook có thể không trả tên */ }
-    }
-  }
-  const conv = await upsertConversation(env, pageId, 'message', customerId, name, text, at, !echo);
+  const conv = await upsertConversation(env, pageId, 'message', customerId, null, text, at, !echo);
+  if (!echo && (!conv.customer_name || !conv.customer_pic)) await fillProfile(env, conv);
   await env.DB.prepare('INSERT OR IGNORE INTO social_messages (conversation_id, direction, channel, text, fb_id, created_at) VALUES (?,?,?,?,?,?)')
     .bind(conv.id, echo ? 'out' : 'in', 'message', text, m.mid, at).run();
 }
@@ -219,7 +241,7 @@ async function sendPrivate(env, conv, token, pageId, commentId, postId, text, us
 // ---------- Hộp thư ----------
 const shapeConv = (c) => ({
   id: c.id, page_id: c.page_id, page_name: c.page_name, page_picture: c.page_picture, kind: c.kind,
-  customer_id: c.customer_id, customer_name: c.customer_name, last_text: c.last_text, last_at: c.last_at,
+  customer_id: c.customer_id, customer_name: c.customer_name, customer_pic: c.customer_pic || null, created_at: c.created_at, last_text: c.last_text, last_at: c.last_at,
   last_in_at: c.last_in_at, unread: c.unread,
   can_message: c.kind === 'message' && !!c.last_in_at && now() - c.last_in_at < DAY,
 });
@@ -259,13 +281,16 @@ export async function readConversation(request, env, user, id) {
      WHERE m.conversation_id = ? ORDER BY m.created_at DESC, m.id DESC LIMIT 200`
   ).bind(c.id).all();
   if (c.unread) await env.DB.prepare('UPDATE social_conversations SET unread = 0 WHERE id = ?').bind(c.id).run();
+  if (c.kind === 'message' && (!c.customer_name || !c.customer_pic)) await fillProfile(env, c);
+  const lastComment = results.find((m) => m.channel === 'comment');
+  const counts = { in: results.filter((m) => m.direction === 'in').length, out: results.filter((m) => m.direction === 'out').length };
   const msgs = results.reverse().map((m) => ({
     id: m.id, direction: m.direction, channel: m.channel, text: m.text, comment_id: m.comment_id, post_id: m.post_id,
     auto: !!m.auto, sent_by_name: m.sent_by_name, created_at: m.created_at,
     // Nhắn riêng được khi bình luận chưa quá 7 ngày và chưa nhắn riêng lần nào.
     can_private: m.channel === 'comment' && now() - m.created_at < 7 * DAY && !results.some((x) => x.channel === 'private_reply' && x.comment_id === m.comment_id),
   }));
-  return json({ conversation: { ...shapeConv(c), unread: 0 }, messages: msgs });
+  return json({ conversation: { ...shapeConv(c), unread: 0, links: fbLinks(c, lastComment), counts }, messages: msgs });
 }
 
 // POST /api/inbox/:id/reply { text, mode: 'message' | 'public' | 'private', comment_id? }
