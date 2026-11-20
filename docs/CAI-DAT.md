@@ -37,7 +37,7 @@ Tài khoản Chủ hệ thống chỉ được tạo một lần, khi cơ sở d
 
 ## 4. Cấu hình app Facebook
 
-Trong app "FarmBase Fanpage" (ID 1693553165520150):
+Trong app "FarmBase Social" (ID 1683859133415974):
 
 1. Thêm sản phẩm hoặc trường hợp sử dụng **Đăng nhập Facebook** nếu chưa có.
 2. Ở **Valid OAuth Redirect URIs**, thêm địa chỉ:

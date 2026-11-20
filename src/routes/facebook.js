@@ -4,7 +4,7 @@ import { HttpError, json, now } from '../lib/http.js';
 import { requireRole, allowedPageIds } from '../lib/auth.js';
 import { audit } from '../lib/audit.js';
 
-// Quyền đã thêm trong app "FarmBase Fanpage". Đổi bằng biến FB_SCOPES nếu cần.
+// Quyền đã thêm trong app "FarmBase Social". Đổi bằng biến FB_SCOPES nếu cần.
 const DEFAULT_SCOPES = [
   'pages_show_list',
   'pages_read_engagement',
@@ -41,6 +41,7 @@ export async function fbStatus(request, env, user) {
     has_token_key: !!env.TOKEN_KEY,
     redirect_uri: redirectUri(request),
     scopes: (env.FB_SCOPES || DEFAULT_SCOPES).split(','),
+    config_id: env.FB_CONFIG_ID || null,
   });
 }
 
@@ -60,7 +61,9 @@ export async function fbConnect(request, env, user) {
   url.searchParams.set('redirect_uri', redirectUri(request));
   url.searchParams.set('state', state);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', env.FB_SCOPES || DEFAULT_SCOPES);
+  // App dùng Facebook Login for Business: nếu có FB_CONFIG_ID thì gửi config_id (cấu hình quyền tạo trong app), không thì gửi scope.
+  if (env.FB_CONFIG_ID) url.searchParams.set('config_id', env.FB_CONFIG_ID);
+  else url.searchParams.set('scope', env.FB_SCOPES || DEFAULT_SCOPES);
   return Response.redirect(url.toString(), 302);
 }
 
