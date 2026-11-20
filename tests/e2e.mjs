@@ -42,7 +42,7 @@ const fakeGraph = createServer(async (req, res) => {
     return res.end(JSON.stringify(w[2] === 'photos' ? { id: `photo${fbSeq}`, post_id: `${pageId}_p${fbSeq}` } : { id: `${pageId}_f${fbSeq}` }));
   }
   const who = u.pathname.match(/^\/v[\d.]+\/(\d+)$/);
-  if (who && u.searchParams.get('fields') === 'name') return res.end(JSON.stringify({ id: who[1], name: `Khách ${who[1]}` }));
+  if (who && (u.searchParams.get('fields') || '').includes('name')) return res.end(JSON.stringify({ id: who[1], name: `Khách ${who[1]}`, profile_pic: `${BASE}/icons/icon.svg` }));
   const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
   if (!m) { res.statusCode = 404; return res.end('{"error":{"message":"không có","code":100}}'); }
   if (u.searchParams.get('access_token') !== `ma-trang-${m[1]}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
@@ -377,6 +377,7 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(r.data.conversations.length, 1);
   const conv = r.data.conversations[0];
   assert.equal(conv.customer_name, 'Khách 900');
+  assert.match(conv.customer_pic, /icon\.svg$/);
   assert.equal(conv.unread, 1); assert.equal(conv.can_message, true); assert.equal(r.data.unread_total, 1);
   r = await viewer.req('/api/inbox');
   assert.equal(r.data.conversations.length, 0, 'biên tập Trang 222 không thấy hộp thư Trang 111');
@@ -387,6 +388,8 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req(`/api/inbox/${conv.id}/reply`, { method: 'POST', body: { text: 'Chào anh, em gửi báo giá ạ' } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.messages.length, 2); assert.equal(r.data.conversation.unread, 0);
+  assert.match(r.data.conversation.links.inbox, /^https:\/\/business\.facebook\.com\/latest\/inbox\/all\?asset_id=111&.*selected_item_id=900/);
+  assert.equal(r.data.conversation.counts.in, 1);
   assert.equal(graphWrites[0].path, '/v27.0/111/messages');
   assert.deepEqual(JSON.parse(graphWrites[0].params.recipient), { id: '900' });
   assert.equal(graphWrites[0].params.messaging_type, 'RESPONSE');
@@ -424,6 +427,7 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   const cconv = r.data.conversations[0];
   r = await owner.req(`/api/inbox/${cconv.id}`);
   assert.equal(r.data.messages.length, 4);
+  assert.equal(r.data.conversation.links.comment, 'https://www.facebook.com/111/posts/1?comment_id=c2');
   assert.equal(r.data.messages.find((m) => m.comment_id === '111_1_c1' && m.channel === 'comment').can_private, false);
   assert.equal(r.data.messages.find((m) => m.comment_id === '111_1_c2').can_private, true);
   // Nhân viên trả lời công khai và nhắn riêng bình luận thứ 2

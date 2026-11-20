@@ -332,6 +332,10 @@ function openAutoReply(pageId, pageName) {
   });
 }
 
+const custAvatar = (c, big = false) => c.customer_pic
+  ? `<img class="avatar ${big ? 'big' : 'ini'}" src="${esc(c.customer_pic)}" alt="" referrerpolicy="no-referrer">`
+  : `<div class="avatar ini ${big ? 'big' : ''}">${esc((c.customer_name || '?').trim().charAt(0).toUpperCase())}</div>`;
+
 async function viewInbox(q) {
   const cid = Number(q.get('c')) || 0;
   layout('hop-thu', 'Hộp thư', 'Tin nhắn Messenger và bình luận của các Fanpage Quý khách quản lý', '<div class="muted">Đang tải…</div>');
@@ -346,7 +350,7 @@ async function viewInbox(q) {
     + `<button class="chip ${inboxState.unread ? 'on' : ''}" data-unr>Chưa đọc <span>${d.unread_total}</span></button>`
     + (pages.length > 1 ? `<select id="ipage" class="sm"><option value="">Mọi Fanpage</option>${pages.map((p) => `<option value="${esc(p.id)}" ${inboxState.page === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : '');
   const list = d.conversations.map((c) => `<a class="conv ${c.id === cid ? 'on' : ''} ${c.unread ? 'new' : ''}" href="#/hop-thu?c=${c.id}">
-      <div class="avatar ini">${esc((c.customer_name || '?').trim().charAt(0).toUpperCase())}</div>
+      ${custAvatar(c)}
       <div class="grow"><div class="row between"><b class="ellipsis">${esc(c.customer_name || 'Khách Facebook')}</b><span class="muted small">${fmtTime(c.last_at)}</span></div>
         <div class="ellipsis small">${c.kind === 'comment' ? '<span class="badge warn">Bình luận</span> ' : ''}${esc(c.last_text || '')}</div>
         <div class="muted small ellipsis">${esc(c.page_name)}</div></div>
@@ -374,8 +378,17 @@ async function loadThread(cid, data) {
         ${m.channel === 'comment' ? ` · <button class="link" data-reply="${esc(m.comment_id)}">Trả lời</button>${m.can_private ? ` · <button class="link" data-priv="${esc(m.comment_id)}">Nhắn riêng</button>` : ''}` : ''}</div></div>`).join('');
   const isMsg = c.kind === 'message';
   const note = isMsg && !c.can_message ? '<div class="alert warn">Đã quá 24 giờ kể từ tin nhắn cuối của khách. Facebook chỉ cho Trang trả lời trong 24 giờ; chờ khách nhắn lại.</div>' : '';
-  box.innerHTML = `<div class="row between thead"><a class="btn ghost sm only-mobile" href="#/hop-thu">← Danh sách</a>
-      <div class="grow"><b>${esc(c.customer_name || 'Khách Facebook')}</b><div class="muted small">${esc(c.page_name)} · ${isMsg ? 'Tin nhắn Messenger' : 'Bình luận trên bài viết'}</div></div></div>
+  const L = c.links || {};
+  const linkBtns = [
+    L.inbox ? `<a class="btn ghost sm" href="${esc(L.inbox)}" target="_blank" rel="noopener">Mở trong Meta Business Suite</a>` : '',
+    L.comment ? `<a class="btn ghost sm" href="${esc(L.comment)}" target="_blank" rel="noopener">Xem bình luận</a>` : '',
+  ].join('');
+  box.innerHTML = `<div class="thead"><a class="btn ghost sm only-mobile" href="#/hop-thu">← Danh sách</a>
+      <div class="cust">${custAvatar(c, true)}<div class="grow"><b>${esc(c.customer_name || 'Khách Facebook')}</b>
+        <div class="muted small">${esc(c.page_name)} · ${isMsg ? 'Tin nhắn Messenger' : 'Bình luận trên bài viết'}</div>
+        <div class="muted small">Liên hệ lần đầu: ${fmtTime(c.created_at)} · ${c.counts ? `${c.counts.in} tin của khách, ${c.counts.out} tin đã trả lời` : ''}</div></div></div>
+      ${linkBtns ? `<div class="row">${linkBtns}</div>` : ''}
+      <div class="muted small">Facebook không cho phần mềm ngoài mở trực tiếp trang cá nhân của khách. ${isMsg ? 'Bấm "Mở trong Meta Business Suite"' : 'Bấm "Xem bình luận"'}, rồi bấm tên khách ở đó để xem trang cá nhân.</div></div>
     <div class="msgs" id="msgs">${msgs || '<p class="muted">Chưa có nội dung.</p>'}</div>${note}
     <form id="rf" class="reply">${isMsg ? '' : `<div class="row small" id="rmode"><label class="check"><input type="radio" name="mode" value="public" checked> Trả lời công khai</label><label class="check"><input type="radio" name="mode" value="private"> Nhắn riêng (Messenger)</label><span class="muted" id="rto"></span></div>`}
       <textarea id="rt" rows="2" maxlength="2000" placeholder="Nhập nội dung trả lời…" ${isMsg && !c.can_message ? 'disabled' : ''}></textarea>

@@ -203,3 +203,7 @@ details.hook .secret { font-size: 13px; letter-spacing: 0; overflow-wrap: anywhe
   .thread { min-height: calc(100vh - 230px); }
   .msg { max-width: 90%; }
 }
+.thread .thead { display: grid; gap: 8px; }
+.cust { display: flex; gap: 12px; align-items: center; }
+.avatar.big { width: 52px; height: 52px; font-size: 20px; display: grid; place-items: center; font-weight: 700; }
+.thread .thead > .only-mobile { justify-self: start; }
