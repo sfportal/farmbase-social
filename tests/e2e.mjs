@@ -42,6 +42,10 @@ const fakeGraph = createServer(async (req, res) => {
     return res.end(JSON.stringify(w[2] === 'photos' ? { id: `photo${fbSeq}`, post_id: `${pageId}_p${fbSeq}` } : { id: `${pageId}_f${fbSeq}` }));
   }
   const who = u.pathname.match(/^\/v[\d.]+\/(\d+)$/);
+  // Khách 901: Facebook không cho đọc hồ sơ theo id, chỉ lấy được tên qua danh sách cuộc trò chuyện của Trang.
+  if (who && who[1] === '901') { res.statusCode = 400; return res.end('{"error":{"message":"Unsupported get request.","code":100}}'); }
+  const cv = u.pathname.match(/^\/v[\d.]+\/(\d+)\/conversations$/);
+  if (cv) return res.end(JSON.stringify({ data: u.searchParams.get('user_id') === '901' ? [{ id: 't_1', participants: { data: [{ id: '901', name: 'Nguyễn Văn Khách' }, { id: cv[1], name: 'Trang' }] } }] : [] }));
   if (who && (u.searchParams.get('fields') || '').includes('name')) return res.end(JSON.stringify({ id: who[1], name: `Khách ${who[1]}`, profile_pic: `${BASE}/icons/icon.svg` }));
   const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
   if (!m) { res.statusCode = 404; return res.end('{"error":{"message":"không có","code":100}}'); }
@@ -439,6 +443,9 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.deepEqual(graphWrites.map((g) => g.path), ['/v27.0/111_1_c2/comments', '/v27.0/111/messages']);
   r = await owner.req('/api/inbox?kind=message');
   assert.ok(r.data.conversations.some((c) => c.customer_id === 'psid-111_1_c1'), 'tin nhắn riêng tạo cuộc trò chuyện Messenger');
+  await hook({ object: 'page', entry: [{ id: '111', messaging: [{ sender: { id: '901' }, recipient: { id: '111' }, timestamp: nowMs, message: { mid: 'mid.in901', text: 'hi' } }] }] });
+  r = await owner.req('/api/inbox?kind=message');
+  assert.equal(r.data.conversations.find((c) => c.customer_id === '901').customer_name, 'Nguyễn Văn Khách', 'lấy tên dự phòng qua danh sách cuộc trò chuyện');
   r = await owner.req('/api/audit');
   assert.ok(['inbox_replied', 'autoreply_updated'].every((a) => r.data.entries.some((e) => e.action === a)));
   step('hộp thư: webhook có chữ ký, chống trùng, tin nhắn và bình luận, tự nhắn riêng khi khách bình luận, trả lời, khung 24 giờ, đúng quyền');

@@ -143,18 +143,30 @@ async function upsertConversation(env, pageId, kind, customerId, name, text, at,
   return env.DB.prepare('SELECT * FROM social_conversations WHERE page_id = ? AND kind = ? AND customer_id = ?').bind(pageId, kind, customerId).first();
 }
 
-// Lấy tên, ảnh đại diện khách Messenger (cần tính năng Business Asset User Profile Access). Lỗi thì bỏ qua.
+// Lấy tên, ảnh đại diện khách Messenger. Cách 1: đọc hồ sơ theo id khách (cần Business Asset User Profile Access).
+// Cách 2 (dự phòng): đọc người tham gia cuộc trò chuyện của Trang (chỉ cần pages_messaging), lấy được tên.
 async function fillProfile(env, conv) {
+  let token, name = null, pic = null, err1 = null;
+  try { token = await pageToken(env, conv.page_id); } catch (e) { return e.message || 'Lỗi mã Trang'; }
   try {
-    const p = await graph(env, conv.customer_id, { fields: 'name,first_name,last_name,profile_pic', access_token: await pageToken(env, conv.page_id) });
-    const name = p.name || [p.last_name, p.first_name].filter(Boolean).join(' ') || null;
-    if (!name && !p.profile_pic) return 'Facebook không trả tên, ảnh của khách';
-    await env.DB.prepare('UPDATE social_conversations SET customer_name = COALESCE(?, customer_name), customer_pic = COALESCE(?, customer_pic) WHERE id = ?')
-      .bind(name, p.profile_pic || null, conv.id).run();
-    conv.customer_name = name || conv.customer_name;
-    conv.customer_pic = p.profile_pic || conv.customer_pic;
-    return null;
-  } catch (e) { return e.message || 'Lỗi khi lấy thông tin khách'; }
+    const p = await graph(env, conv.customer_id, { fields: 'name,first_name,last_name,profile_pic', access_token: token });
+    name = p.name || [p.last_name, p.first_name].filter(Boolean).join(' ') || null;
+    pic = p.profile_pic || null;
+  } catch (e) { err1 = e.message || 'Lỗi khi lấy hồ sơ khách'; }
+  if (!name) {
+    try {
+      const r = await graph(env, `${conv.page_id}/conversations`, { platform: 'messenger', user_id: conv.customer_id, fields: 'participants', access_token: token });
+      const ps = (r.data && r.data[0] && r.data[0].participants && r.data[0].participants.data) || [];
+      const who = ps.find((x) => String(x.id) === String(conv.customer_id)) || ps.find((x) => String(x.id) !== String(conv.page_id));
+      if (who && who.name) name = who.name;
+    } catch (e) { if (!err1) err1 = e.message; }
+  }
+  if (!name && !pic) return err1 || 'Facebook không trả tên, ảnh của khách';
+  await env.DB.prepare('UPDATE social_conversations SET customer_name = COALESCE(?, customer_name), customer_pic = COALESCE(?, customer_pic) WHERE id = ?')
+    .bind(name, pic, conv.id).run();
+  conv.customer_name = name || conv.customer_name;
+  conv.customer_pic = pic || conv.customer_pic;
+  return null;
 }
 
 // Liên kết mở khách trên Facebook: Facebook không cho lấy trang cá nhân qua API (id khách chỉ dùng trong app),
