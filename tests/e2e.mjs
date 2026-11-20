@@ -41,6 +41,20 @@ const fakeGraph = createServer(async (req, res) => {
     }
     return res.end(JSON.stringify(w[2] === 'photos' ? { id: `photo${fbSeq}`, post_id: `${pageId}_p${fbSeq}` } : { id: `${pageId}_f${fbSeq}` }));
   }
+  // Quảng cáo: tài khoản act_555 (VND), 2 chiến dịch, chỉ chiến dịch 1 có số liệu.
+  const ad = u.pathname.match(/^\/v[\d.]+\/(me\/adaccounts|act_\d+(?:\/campaigns|\/insights)?)$/);
+  if (ad) {
+    if (u.searchParams.get('access_token') !== 'ma-nguoi-dung') { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
+    const p = ad[1];
+    if (p === 'me/adaccounts') return res.end(JSON.stringify({ data: [{ id: 'act_555', account_id: '555', name: 'QC FarmBase', currency: 'VND', account_status: 1, amount_spent: '1500000' }] }));
+    if (p === 'act_555') return res.end(JSON.stringify({ id: 'act_555', account_id: '555', name: 'QC FarmBase', currency: 'VND', account_status: 1 }));
+    if (p === 'act_555/campaigns') return res.end(JSON.stringify({ data: [
+      { id: 'c2', name: 'Chiến dịch tạm dừng', status: 'PAUSED', effective_status: 'PAUSED', objective: 'OUTCOME_TRAFFIC', lifetime_budget: '2000000' },
+      { id: 'c1', name: 'Tin nhắn sầu riêng', status: 'ACTIVE', effective_status: 'ACTIVE', objective: 'OUTCOME_ENGAGEMENT', daily_budget: '200000' }] }));
+    const row = { spend: '700000', impressions: '35000', reach: '20000', clicks: '900', ctr: '2.57', cpm: '20000', actions: [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '35' }, { action_type: 'link_click', value: '400' }] };
+    if (p === 'act_555/insights') return res.end(JSON.stringify({ data: u.searchParams.get('level') === 'campaign' ? [{ campaign_id: 'c1', ...row }] : [row] }));
+    res.statusCode = 400; return res.end('{"error":{"message":"(#200) Không có quyền","code":200}}');
+  }
   const who = u.pathname.match(/^\/v[\d.]+\/(\d+)$/);
   // Khách 901: Facebook không cho đọc hồ sơ theo id, chỉ lấy được tên qua danh sách cuộc trò chuyện của Trang.
   if (who && who[1] === '901') { res.statusCode = 400; return res.end('{"error":{"message":"Unsupported get request.","code":100}}'); }
@@ -451,6 +465,33 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   step('hộp thư: webhook có chữ ký, chống trùng, tin nhắn và bình luận, tự nhắn riêng khi khách bình luận, trả lời, khung 24 giờ, đúng quyền');
 }
 
+// 10c. Quảng cáo (chỉ đọc)
+{
+  let r = await owner.req('/api/ads/accounts');
+  assert.equal(r.status, 409); assert.equal(r.data.code, 'no_ads_token');
+  const encU = await encryptSecret('ma-nguoi-dung', KEY);
+  sql(`INSERT INTO social_settings (key, value, updated_at) VALUES ('fb_user_token', '${JSON.stringify({ enc: encU, at: 0, expires_at: null }).replace(/"/g, '\\"')}', 0);`);
+  r = await owner.req('/api/ads/accounts');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.accounts.length, 1);
+  assert.equal(r.data.accounts[0].id, '555'); assert.equal(r.data.accounts[0].amount_spent, 1500000);
+  r = await viewer.req('/api/ads/accounts');
+  assert.equal(r.status, 403, 'biên tập viên không xem quảng cáo');
+  r = await owner.req('/api/ads/accounts/555/campaigns?preset=xau');
+  assert.equal(r.status, 400);
+  r = await owner.req('/api/ads/accounts/abc/campaigns');
+  assert.equal(r.status, 400);
+  r = await owner.req('/api/ads/accounts/555/campaigns?preset=last_30d');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.totals.spend, 700000); assert.equal(r.data.totals.messages, 35); assert.equal(r.data.totals.cost_per_message, 20000);
+  assert.deepEqual(r.data.campaigns.map((c) => c.id), ['c1', 'c2'], 'chiến dịch đang chạy lên trước');
+  assert.equal(r.data.campaigns[0].daily_budget, 200000);
+  assert.equal(r.data.campaigns[1].has_data, false); assert.equal(r.data.campaigns[1].insights.spend, 0);
+  assert.ok(graphHits.some((h) => h.includes('act_555/insights') && h.includes('date_preset=last_30d')));
+  assert.ok(!graphWrites.some((g) => g.path.includes('act_')), 'không ghi gì lên tài khoản quảng cáo');
+  step('quảng cáo: chưa có quyền thì báo rõ, xem tài khoản, chiến dịch, chi tiêu, kết quả theo khoảng ngày, đúng phân quyền, chỉ đọc');
+}
+
 // 11. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -470,9 +511,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'quang-cao', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(['bai-dang', 'lich-dang'].includes(route) ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });

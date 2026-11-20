@@ -4,6 +4,7 @@ import { HttpError, json, now } from '../lib/http.js';
 import { requireRole, allowedPageIds } from '../lib/auth.js';
 import { audit } from '../lib/audit.js';
 import { subscribePage, verifyToken } from './inbox.js';
+import { saveUserToken } from './ads.js';
 
 // Quyền đã thêm trong app "FarmBase Social". Đổi bằng biến FB_SCOPES nếu cần.
 const DEFAULT_SCOPES = [
@@ -14,6 +15,7 @@ const DEFAULT_SCOPES = [
   'pages_read_user_content',
   'pages_manage_engagement',
   'pages_messaging',
+  'ads_read',
 ].join(',');
 
 // FB_GRAPH_BASE chỉ dùng khi chạy thử trên máy (máy chủ Facebook giả), không đặt trên Cloudflare.
@@ -95,6 +97,9 @@ export async function fbCallback(request, env, user) {
       client_secret: env.FB_APP_SECRET,
       fb_exchange_token: short.access_token,
     });
+
+    // Lưu mã người dùng dài hạn (đã mã hóa) để đọc quảng cáo; Trang dùng mã Trang riêng.
+    await saveUserToken(env, user.id, long.access_token, long.expires_in);
 
     // Mã Trang lấy từ mã người dùng dài hạn là mã dài hạn.
     const pages = [];

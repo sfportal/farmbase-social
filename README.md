@@ -16,6 +16,8 @@ Chạy trên Cloudflare Workers + D1 (gói miễn phí; dùng chung D1 `farmbase
 | 2 | Lịch nội dung, gửi duyệt, duyệt, đăng ngay hoặc hẹn giờ bằng lịch của Facebook | Xong |
 | 3 | Webhook, hộp thư chung (tin nhắn, bình luận), trả lời trong hệ thống, tự nhắn riêng và trả lời công khai khi khách bình luận | Xong |
 | 3 | AI gợi ý câu trả lời | Chưa làm |
+| Thêm | Quảng cáo: xem tài khoản quảng cáo, chiến dịch, ngân sách, chi tiêu, tin nhắn, chi phí mỗi kết quả theo khoảng thời gian (chỉ đọc, quyền `ads_read`) | Xong |
+| Thêm | Quảng cáo: tạm dừng, bật lại chiến dịch, đổi ngân sách | Chưa làm |
 | 4 | CRM mini, ghi đơn, kho kiến thức AI, báo cáo tuần | Chưa làm |
 
 ## API
@@ -53,6 +55,8 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | GET | `/api/inbox/:id`: tin trong cuộc trò chuyện, đánh dấu đã đọc | Mọi vai trò |
 | POST | `/api/inbox/:id/reply` `{ text, mode: message\|public\|private, comment_id? }`: trả lời tin nhắn (trong 24 giờ), trả lời công khai hoặc nhắn riêng bình luận (1 lần, trong 7 ngày) | Mọi vai trò |
 | GET, PUT | `/api/pages/:id/autoreply` `{ enabled, message, public_enabled, public_text }`: tự trả lời khi khách bình luận lần đầu trên mỗi bài, `{ten}` chèn tên khách | Xem: mọi vai trò; sửa: Chủ hệ thống, Quản lý |
+| GET | `/api/ads/accounts`: tài khoản quảng cáo của người kết nối Facebook (dùng mã người dùng dài hạn lưu khi kết nối) | Chủ hệ thống, Quản lý |
+| GET | `/api/ads/accounts/:id/campaigns?preset=today\|yesterday\|last_7d\|last_30d\|this_month\|last_month`: chiến dịch, ngân sách, chi tiêu, kết quả và tổng | Chủ hệ thống, Quản lý |
 | GET | `/api/fb/status`, `/api/fb/connect`, `/api/fb/callback` | Chủ hệ thống |
 
 ## Chạy thử trên máy
