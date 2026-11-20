@@ -11,7 +11,7 @@
 - D1 binding `DB`: **dùng chung D1 `farmbase` của website farmbase.vn** (gói miễn phí giới hạn 10 D1). Mọi bảng phải có tiền tố `social_`, bảng theo dõi migration là `social_migrations`. Không bao giờ đọc, sửa hay xóa bảng không có tiền tố `social_`.
 - Migration trong `migrations/` (đánh số tăng dần, không sửa migration đã chạy).
 - Biến bí mật: `ADMIN_EMAIL`, `ADMIN_INITIAL_PASSWORD`, `TOKEN_KEY`, `FB_APP_SECRET`. Biến thường: `FB_APP_ID`, `FB_API_VERSION`, tùy chọn `FB_SCOPES`, `FB_CONFIG_ID` (cấu hình Facebook Login for Business "Quan ly Fanpage"; có thì gửi config_id thay cho scope).
-- App Meta "FarmBase Social", ID 1683859133415974 (chủ sở hữu: Công ty Cổ phần BVI), đang ở chế độ phát triển.
+- App Meta "FarmBase Social", ID 1683859133415974 (chủ sở hữu: Công ty Cổ phần BVI), đã Publish (chạy thật) ngày 20/11/2026, quyền ở mức cơ bản: chỉ dùng cho Trang mà người có vai trò trong app quản lý; không đăng ký Tech Provider.
 
 ## Quy ước mã
 - JavaScript thuần, không bước build. Router trong `src/index.js` (bảng `ROUTES`, tùy chọn `public`, `allowMustChange`, `nav`).
