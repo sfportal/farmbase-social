@@ -441,6 +441,21 @@ async function uploadFile(file) {
   return data;
 }
 
+// ---------- Footer riêng từng Fanpage (lời kêu gọi, hotline, website, hashtag) ----------
+let stylesCache = null;
+async function loadStyles(force) {
+  if (!stylesCache || force) stylesCache = await api('/api/styles').catch(() => ({ global: {}, pages: [] }));
+  return stylesCache;
+}
+function pageFooter(st, pageId) {
+  const ps = (st?.pages || []).find((p) => p.id === pageId)?.style || {};
+  const has = ps.cta || ps.hotline || ps.website || ps.hashtags;
+  const contact = has ? [ps.cta, ps.hotline, ps.website ? `Website: ${ps.website}` : ''].filter(Boolean).join('\n') : (st?.global?.contact || '');
+  const tags = has ? ps.hashtags : (st?.global?.hashtags || '');
+  return [contact, tags].filter(Boolean).join('\n\n');
+}
+const composeFor = (st, pageId, main) => [String(main || '').trim(), pageFooter(st, pageId)].filter(Boolean).join('\n\n');
+
 function contentForm(pages, item, perms, pre) {
   const editing = !!item;
   const v = item || pre || {};
@@ -463,8 +478,9 @@ function contentForm(pages, item, perms, pre) {
           <a class="small" href="#/quy-dinh" target="_blank" rel="noopener">Xem quy định</a></div>
         <div id="aimsg"></div>
       </details>
-      <label for="msg">Nội dung</label><textarea id="msg" rows="7" maxlength="5000" placeholder="Viết nội dung bài đăng…">${esc(v.message || '')}</textarea>
+      <label for="msg">${editing ? 'Nội dung' : 'Nội dung chung'}</label><textarea id="msg" rows="7" maxlength="5000" placeholder="Viết nội dung bài đăng…">${esc(v.message || '')}</textarea>
       <div class="muted small" id="cnt"></div>
+      ${editing ? '' : '<div id="pv"></div>'}
       <label for="lnk">Liên kết (không bắt buộc)</label><input id="lnk" type="url" placeholder="https://farmbase.vn/…" value="${esc(v.link || '')}">
       <label>Ảnh hoặc video</label>
       ${perms.media_enabled
@@ -485,7 +501,43 @@ function openContentForm(pages, item, perms, pre) {
     const f = m.querySelector('#cf');
     const cnt = m.querySelector('#cnt');
     const upd = () => (cnt.textContent = `${f.msg.value.length}/5000 ký tự`);
-    f.msg.oninput = upd; upd();
+    // Bài mới: mỗi Trang một bản = nội dung chung + footer riêng của Trang; sửa riêng từng bản được.
+    const variants = {};
+    let st = null;
+    const pv = m.querySelector('#pv');
+    const drawVariants = () => {
+      if (!pv || !st) return;
+      const ids = pickedPages();
+      for (const id of ids) if (!variants[id]) variants[id] = { text: composeFor(st, id, f.msg.value), edited: false };
+      for (const id of ids) if (!variants[id].edited) variants[id].text = composeFor(st, id, f.msg.value);
+      if (!ids.length) { pv.innerHTML = ''; return; }
+      pv.innerHTML = `<div class="pvhead"><b>Bài sẽ đăng trên từng Trang</b><span class="muted small">Tự gắn lời kêu gọi, hotline, website, hashtag của từng Trang. <a href="#/quy-dinh" target="_blank" rel="noopener">Thiết lập</a></span></div>
+        ${ids.map((id) => { const p = pages.find((x) => x.id === id); const note = (st.pages.find((x) => x.id === id)?.style || {}).note; return `<div class="pvar" data-pid="${esc(id)}">
+          <div class="row between"><b class="small">${esc(p?.name || id)}</b><span class="tag ${variants[id].edited ? '' : 'muted'}">${variants[id].edited ? 'Đã sửa riêng' : 'Theo nội dung chung'}</span></div>
+          <textarea rows="${ids.length > 1 ? 6 : 5}" maxlength="5000" data-var="${esc(id)}">${esc(variants[id].text)}</textarea>
+          <div class="row sact"><button type="button" class="btn ghost sm" data-adapt="${esc(id)}">✨ AI chỉnh cho Trang này</button>${variants[id].edited ? `<button type="button" class="btn ghost sm" data-resync="${esc(id)}">Lấy lại theo nội dung chung</button>` : ''}${note ? `<span class="muted small" title="${esc(note)}">Có lưu ý riêng</span>` : ''}</div></div>`; }).join('')}`;
+      pv.querySelectorAll('[data-var]').forEach((t) => (t.oninput = () => {
+        const v = variants[t.dataset.var]; const was = v.edited; v.text = t.value; v.edited = true;
+        if (!was) { const tag = t.closest('.pvar').querySelector('.tag'); tag.textContent = 'Đã sửa riêng'; tag.classList.remove('muted'); }
+      }));
+      pv.querySelectorAll('[data-resync]').forEach((b) => (b.onclick = () => { variants[b.dataset.resync].edited = false; drawVariants(); }));
+      pv.querySelectorAll('[data-adapt]').forEach((b) => (b.onclick = async () => {
+        const id = b.dataset.adapt;
+        if (!f.msg.value.trim()) return toast('Chưa có nội dung chung để chỉnh');
+        b.disabled = true; b.textContent = 'AI đang chỉnh…';
+        try {
+          const d = await api('/api/ai/adapt', { method: 'POST', body: { text: f.msg.value, page_id: id } });
+          variants[id] = { text: composeFor(st, id, d.body), edited: true }; drawVariants();
+        } catch (e) { toast(e.message); b.disabled = false; b.textContent = '✨ AI chỉnh cho Trang này'; }
+      }));
+    };
+    if (pv) {
+      loadStyles().then((x) => { st = x; drawVariants(); });
+      f.querySelectorAll('input[name=pg]').forEach((c) => c.addEventListener('change', drawVariants));
+    }
+    let syncT;
+    f.msg.oninput = () => { upd(); clearTimeout(syncT); syncT = setTimeout(drawVariants, 200); };
+    upd();
     m.querySelector('[data-close]').onclick = close;
     const media = [...(item?.media || [])];
     const mlist = m.querySelector('#mlist');
@@ -519,8 +571,8 @@ function openContentForm(pages, item, perms, pre) {
       btns.forEach((b) => (b.disabled = true));
       aimsg.innerHTML = '<div class="muted small">AI đang viết, khoảng 10 đến 20 giây…</div>';
       try {
-        const d = await api('/api/ai/write', { method: 'POST', body: { brief, length: f.alen.value, page_ids: pickedPages(), current: rewrite ? f.msg.value : '' } });
-        f.msg.value = d.text; upd();
+        const d = await api('/api/ai/write', { method: 'POST', body: { brief, length: f.alen.value, page_ids: pickedPages(), current: rewrite ? f.msg.value : '', body_only: !!pv } });
+        f.msg.value = pv ? (d.body ?? d.text) : d.text; upd(); drawVariants();
         aimsg.innerHTML = '<div class="muted small">Đã viết xong. Quý khách đọc lại, sửa số liệu và tên riêng cho đúng trước khi gửi.</div>';
       } catch (e) { aimsg.innerHTML = `<div class="alert err small">${esc(e.message)}</div>`; }
       btns.forEach((b) => (b.disabled = false));
@@ -554,7 +606,8 @@ function openContentForm(pages, item, perms, pre) {
           if (act === 'submit') items = [(await api(`/api/content/${item.id}/submit`, { method: 'POST' })).item];
           if (act === 'publish') items = [(await api(`/api/content/${item.id}/approve`, { method: 'POST' })).item];
         } else {
-          items = (await api('/api/content', { method: 'POST', body: { ...body, page_ids, action: act } })).items;
+          const messages = pv && st ? Object.fromEntries(page_ids.map((id) => [id, (variants[id]?.text ?? composeFor(st, id, f.msg.value))])) : undefined;
+          items = (await api('/api/content', { method: 'POST', body: { ...body, page_ids, action: act, messages } })).items;
         }
         close();
         const failed = items.filter((i) => i.status === 'failed');
@@ -737,6 +790,7 @@ async function viewRules() {
       <div class="actions">${d.text ? '' : '<button type="button" class="btn ghost" id="sample">Dùng mẫu gợi ý</button>'}<button type="submit" class="btn">Lưu quy định</button></div>
     </form>` : `<div class="rules">${d.text ? esc(d.text) : '<span class="muted">Quản lý chưa soạn quy định.</span>'}</div>${d.contact || d.hashtags ? `<p class="small"><b>Liên hệ cuối bài:</b> ${esc(d.contact || '(chưa có)')}<br><b>Hashtag:</b> ${esc(d.hashtags || '(chưa có)')}</p>` : ''}`}
   </div>`;
+  renderPageStyles();
   const f = document.getElementById('rf');
   if (!f) return;
   const cnt = document.getElementById('rcnt');
@@ -749,6 +803,41 @@ async function viewRules() {
     try { await api('/api/rules', { method: 'PUT', body: { text: f.rules.value, contact: f.rcontact.value, hashtags: f.rtags.value } }); toast('Đã lưu quy định'); viewRules(); }
     catch (err) { document.getElementById('rmsg').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
   };
+}
+
+async function renderPageStyles() {
+  const view = document.getElementById('view');
+  const box = document.createElement('div');
+  box.className = 'card'; box.id = 'pstyles'; box.style.marginTop = '16px';
+  box.innerHTML = '<div class="muted">Đang tải thiết lập từng Fanpage…</div>';
+  view.appendChild(box);
+  const d = await loadStyles(true);
+  if (!d.pages.length) { box.innerHTML = '<p class="muted" style="margin:0">Chưa có Fanpage nào để thiết lập.</p>'; return; }
+  const ed = d.can_edit;
+  box.innerHTML = `<h2 style="margin-top:0">Thiết lập theo từng Fanpage</h2>
+    <p class="muted small">Khi soạn một bài cho nhiều Trang, mỗi Trang tự gắn phần cuối bài riêng dưới đây. Trang để trống thì dùng liên hệ và hashtag chung ở trên. "Lưu ý nội dung" giúp AI chỉnh bài cho hợp từng Trang.</p>
+    <div class="pslist">${d.pages.map((p) => { const s = p.style || {}; return `<details class="pstyle" ${d.pages.length === 1 ? 'open' : ''}><summary><b>${esc(p.name)}</b> <span class="muted small">${s.hotline || s.hashtags || s.cta ? 'Đã thiết lập' : 'Dùng thiết lập chung'}</span></summary>
+      <form data-ps="${esc(p.id)}" novalidate>
+        <label>Lời kêu gọi (call-to-action)</label><input name="cta" maxlength="300" placeholder="Ví dụ: 👉 Nhắn tin cho Trang để đăng ký tham gia" value="${esc(s.cta || '')}" ${ed ? '' : 'disabled'}>
+        <label>Hotline</label><input name="hotline" maxlength="200" placeholder="Ví dụ: Hotline BVI: 0944 374 068" value="${esc(s.hotline || '')}" ${ed ? '' : 'disabled'}>
+        <label>Website</label><input name="website" maxlength="200" placeholder="https://farmbase.vn" value="${esc(s.website || '')}" ${ed ? '' : 'disabled'}>
+        <label>Hashtag</label><input name="hashtags" maxlength="600" placeholder="#FarmBase #MaSoVungTrong" value="${esc(s.hashtags || '')}" ${ed ? '' : 'disabled'}>
+        <label>Lưu ý nội dung cho Trang này</label><textarea name="note" rows="3" maxlength="1500" placeholder="Ví dụ: Trang hướng tới bà con nông dân, lời lẽ gần gũi; nhấn mạnh tập huấn miễn phí; không nói về giá." ${ed ? '' : 'disabled'}>${esc(s.note || '')}</textarea>
+        <div class="muted small">Xem trước phần cuối bài:</div><pre class="pfoot">${esc(pageFooter(d, p.id) || '(trống)')}</pre>
+        ${ed ? '<div class="actions"><button type="submit" class="btn sm">Lưu cho Trang này</button></div>' : ''}
+      </form></details>`; }).join('')}</div>`;
+  box.querySelectorAll('form[data-ps]').forEach((fm) => {
+    const prev = fm.querySelector('.pfoot');
+    const live = () => { const tmp = { ...d, pages: d.pages.map((p) => (p.id === fm.dataset.ps ? { ...p, style: { cta: fm.cta.value, hotline: fm.hotline.value, website: fm.website.value, hashtags: fm.hashtags.value } } : p)) }; prev.textContent = pageFooter(tmp, fm.dataset.ps) || '(trống)'; };
+    fm.querySelectorAll('input').forEach((i) => (i.oninput = live));
+    fm.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api(`/api/styles/${encodeURIComponent(fm.dataset.ps)}`, { method: 'PUT', body: { cta: fm.cta.value, hotline: fm.hotline.value, website: fm.website.value, hashtags: fm.hashtags.value, note: fm.note.value } });
+        toast('Đã lưu thiết lập Trang'); stylesCache = null;
+      } catch (err) { toast(err.message); }
+    };
+  });
 }
 
 // ---------- Bài đăng ----------
@@ -1023,7 +1112,7 @@ function renderSourceItems(pages) {
           const chosen = pages.filter((p) => page_ids.includes(p.id));
           const isFb = /facebook\.com/.test(it.url);
           openContentForm(chosen, null, { can_create: true, can_approve: me.role === 'owner' || me.role === 'manager', media_enabled: !!c.media_enabled },
-            { message: r.text, link: r.link || '', image_url: mode === 'rewrite' && it.image && !isFb ? it.image : '' });
+            { message: r.body ?? r.text, link: r.link || '', image_url: mode === 'rewrite' && it.image && !isFb ? it.image : '' });
           toast('AI đã viết xong. Quý khách đọc lại trước khi lưu hoặc đăng.');
         } catch (err) { box2.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
       };
@@ -1406,7 +1495,7 @@ const ACTIONS = {
   user_created: 'Tạo tài khoản', user_updated: 'Sửa tài khoản', user_unlocked: 'Mở khóa tài khoản',
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
-  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', source_added: 'Thêm nguồn nội dung', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
+  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
   media_uploaded: 'Tải ảnh/video lên', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',

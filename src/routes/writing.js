@@ -31,7 +31,9 @@ export function ruleLimits(rules) {
 }
 
 // Bỏ số điện thoại, câu liên hệ, hashtag AI tự viết; giới hạn biểu tượng; rồi gắn nguồn, liên hệ và hashtag đúng quy định.
-export function enforceStyle(text, { rules = '', contact = '', hashtags = '', source = '' } = {}) {
+export function enforceStyle(text, { rules = '', contact = '', hashtags = '', source = '', strip = false } = {}) {
+  // strip: chỉ lấy phần thân bài (bỏ liên hệ, hashtag AI tự viết); footer riêng từng Trang gắn ở khung soạn.
+  if (strip) contact = contact || ' '; // có giá trị để bỏ câu liên hệ AI tự viết
   const allowedPhones = new Set([...(`${rules}\n${contact}`.match(PHONE) || [])].map(digits));
   const lim = ruleLimits(rules);
   const modelTags = parseTags(text);
@@ -55,7 +57,8 @@ export function enforceStyle(text, { rules = '', contact = '', hashtags = '', so
   body = body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const allowed = parseTags(hashtags);
   let tags = [];
-  if (allowed.length) {
+  if (strip) tags = [];
+  else if (allowed.length) {
     const map = new Map(allowed.map((t) => [foldTag(t), t]));
     const farm = allowed.find((t) => foldTag(t) === '#farmbase') || '#FarmBase';
     tags = [farm, ...modelTags.map((t) => map.get(foldTag(t))).filter(Boolean)];
@@ -90,12 +93,72 @@ export async function saveRules(request, env, user) {
   return json({ ok: true, updated_at: t });
 }
 
+// ---------- Thiết lập riêng từng Fanpage: lời kêu gọi, hotline, website, hashtag, lưu ý nội dung ----------
+const STYLE_FIELDS = { cta: 300, hotline: 200, website: 200, hashtags: 600, note: 1500 };
+export async function getPageStyles(env, pageIds) {
+  if (!pageIds.length) return {};
+  const keys = pageIds.map((id) => `page_style:${id}`);
+  const { results } = await env.DB.prepare(`SELECT key, value FROM social_settings WHERE key IN (${keys.map(() => '?').join(',')})`).bind(...keys).all();
+  const out = {};
+  for (const r of results) { try { out[r.key.slice(11)] = JSON.parse(r.value); } catch { /* bỏ qua */ } }
+  return out;
+}
+
+// GET /api/styles
+export async function listStyles(request, env, user) {
+  if (user.role === 'agent') throw new HttpError(403, 'Không có quyền', 'forbidden');
+  const ids = await allowedPageIds(env, user);
+  const pages = ids.length ? (await env.DB.prepare(`SELECT id, name FROM social_pages WHERE id IN (${ids.map(() => '?').join(',')}) AND status != 'disconnected' ORDER BY name`).bind(...ids).all()).results : [];
+  const styles = await getPageStyles(env, pages.map((p) => p.id));
+  const r = await getRules(env);
+  return json({ global: { contact: r.contact, hashtags: r.hashtags }, pages: pages.map((p) => ({ id: p.id, name: p.name, style: styles[p.id] || {} })), can_edit: user.role === 'owner' || user.role === 'manager' });
+}
+
+// PUT /api/styles/:pageId { cta, hotline, website, hashtags, note }
+export async function saveStyle(request, env, user, pageId) {
+  requireRole(user, 'owner', 'manager');
+  if (!(await allowedPageIds(env, user)).includes(String(pageId))) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
+  const body = await readJson(request);
+  const style = {};
+  for (const [k, max] of Object.entries(STYLE_FIELDS)) style[k] = typeof body[k] === 'string' ? body[k].trim().slice(0, max) : '';
+  style.hashtags = parseTags(style.hashtags).join(' ');
+  if (style.website && !/^https?:\/\//i.test(style.website)) style.website = `https://${style.website}`;
+  const t = now();
+  await env.DB.prepare("INSERT INTO social_settings (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at")
+    .bind(`page_style:${pageId}`, JSON.stringify(style), user.id, t).run();
+  await audit(env, request, user.id, 'page_style_updated', String(pageId));
+  return json({ style });
+}
+
+// POST /api/ai/adapt { text, page_id }: chỉnh thân bài cho hợp một Trang (theo lưu ý riêng của Trang đó)
+export async function aiAdapt(request, env, user) {
+  if (user.role === 'agent') throw new HttpError(403, 'Không có quyền', 'forbidden');
+  const body = await readJson(request);
+  const text = typeof body.text === 'string' ? body.text.trim().slice(0, 5000) : '';
+  const pageId = String(body.page_id || '');
+  if (!text) throw new HttpError(400, 'Chưa có nội dung để chỉnh', 'empty');
+  if (!(await allowedPageIds(env, user)).includes(pageId)) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
+  const page = await env.DB.prepare('SELECT name FROM social_pages WHERE id = ?').bind(pageId).first();
+  const style = (await getPageStyles(env, [pageId]))[pageId] || {};
+  const st = await getRules(env);
+  const prompt = `Chỉnh bài dưới đây cho phù hợp với Fanpage "${page.name}"${style.note ? `, theo lưu ý riêng của Trang: ${style.note}` : ''}. Giữ nguyên ý và thông tin, không thêm số liệu mới, độ dài tương đương. Không viết phần liên hệ, hotline, website, hashtag (hệ thống tự thêm).\n\nBài gốc:\n${text}`;
+  const { text: out, provider } = await generate(env, { system: systemPrompt(st.value, [page.name], { bodyOnly: true }), prompt, maxTokens: 1200 });
+  const src = text.match(/^\s*Nguồn:\s*(\S+)\s*$/im);
+  const res = enforceStyle(tidy(provider === 'fake' ? `${out} [${page.name}]` : out), { rules: st.value, strip: true, source: src ? src[1] : '' });
+  if (!res) throw new HttpError(502, 'AI chưa trả về nội dung, vui lòng thử lại', 'ai_empty');
+  await audit(env, request, user.id, 'ai_written', `Chỉnh cho Trang: ${page.name}`.slice(0, 80));
+  return json({ body: res.slice(0, 5000), provider: PROVIDER_LABELS[provider] });
+}
+
 export function systemPrompt(rules, pageNames, style = {}) {
-  const auto = style.contact || style.hashtags;
   const lim = ruleLimits(rules);
   const emo = lim.maxEmoji !== null
     ? `Dùng ${lim.minEmoji ? `${lim.minEmoji} đến ` : 'tối đa '}${lim.maxEmoji} biểu tượng cảm xúc phù hợp chủ đề (ví dụ 🌱 🌿 🍈 ☕ ✅ 📌 📲 👉) cho bài sinh động: đặt ở đầu câu mở đầu, trước ý chính hoặc lời kêu gọi; không đặt hai biểu tượng liền nhau, không rải mỗi câu một biểu tượng.`
     : 'Có thể dùng vài biểu tượng cảm xúc phù hợp cho sinh động, không lạm dụng.';
+  let tail;
+  if (style.bodyOnly) tail = 'Không tự viết số điện thoại, website, hashtag hay câu "liên hệ qua số..."; hệ thống tự thêm phần cuối bài riêng cho từng Trang. Kết bài bằng một câu kêu gọi ngắn không kèm số.';
+  else if (style.contact || style.hashtags) tail = `Không tự viết số điện thoại, website hay câu "liên hệ qua số..." vì hệ thống tự thêm phần liên hệ chuẩn ở cuối bài${style.contact ? ` (${style.contact})` : ''}. Kết bài bằng một câu kêu gọi ngắn không kèm số.${style.hashtags ? ` Dòng cuối ghi 2 đến 4 hashtag chọn trong danh sách: ${style.hashtags}.` : ''}`;
+  else tail = 'Không tự bịa số điện thoại hay địa chỉ website.';
   return [
     'Bạn là người viết nội dung Fanpage Facebook cho doanh nghiệp Việt Nam.',
     'Viết bằng tiếng Việt có dấu, tự nhiên, đúng chính tả. Chỉ trả về đúng nội dung bài đăng, không giải thích, không tiêu đề kiểu Markdown, không dùng ** hay #.',
@@ -103,7 +166,8 @@ export function systemPrompt(rules, pageNames, style = {}) {
     emo,
     pageNames.length ? `Bài sẽ đăng trên Fanpage: ${pageNames.join(', ')}.` : '',
     rules ? `QUY ĐỊNH ĐĂNG BÀI CỦA DOANH NGHIỆP (bắt buộc tuân theo, ưu tiên cao nhất):\n${rules}` : '',
-    auto ? `Không tự viết số điện thoại, website hay câu "liên hệ qua số..." vì hệ thống tự thêm phần liên hệ chuẩn ở cuối bài${style.contact ? ` (${style.contact})` : ''}. Kết bài bằng một câu kêu gọi ngắn không kèm số.${style.hashtags ? ` Dòng cuối ghi 2 đến 4 hashtag chọn trong danh sách: ${style.hashtags}.` : ''}` : 'Không tự bịa số điện thoại hay địa chỉ website.',
+    style.note ? `LƯU Ý RIÊNG CỦA FANPAGE (áp dụng cho bài này): ${style.note}` : '',
+    tail,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -120,12 +184,14 @@ export async function aiWrite(request, env, user) {
   const length = LENGTHS[body.length] || LENGTHS.vua;
 
   let pageNames = [];
+  let note = '';
   if (Array.isArray(body.page_ids) && body.page_ids.length) {
     const allowed = await allowedPageIds(env, user);
     const ids = body.page_ids.map(String).filter((p) => allowed.includes(p)).slice(0, 20);
     if (ids.length) {
       const { results } = await env.DB.prepare(`SELECT name FROM social_pages WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all();
       pageNames = results.map((r) => r.name);
+      if (ids.length === 1) note = (await getPageStyles(env, ids))[ids[0]]?.note || '';
     }
   }
   const st = await getRules(env);
@@ -134,10 +200,13 @@ export async function aiWrite(request, env, user) {
     ? `Viết lại bài dưới đây cho hay hơn, độ dài ${length}.${brief ? `\nYêu cầu thêm: ${brief}` : ''}\n\nBài hiện tại:\n${current}`
     : `Viết một bài đăng Facebook, độ dài ${length}, từ ý chính sau:\n${brief}`;
 
-  let { text, provider } = await generate(env, { system: systemPrompt(rules, pageNames, st), prompt: task, maxTokens: 1200 });
+  const bodyOnly = body.body_only === true;
+  let { text, provider } = await generate(env, { system: systemPrompt(rules, pageNames, bodyOnly ? { bodyOnly: true, note } : { ...st, note }), prompt: task, maxTokens: 1200 });
   if (provider === 'fake' && rules) text += ' [theo quy định]'; // chỉ dùng khi chạy thử trên máy
-  text = enforceStyle(tidy(text), { rules, contact: st.contact, hashtags: st.hashtags }).slice(0, 5000);
+  const raw = tidy(text);
+  const bodyText = enforceStyle(raw, { rules, strip: true }).slice(0, 5000);
+  text = enforceStyle(raw, { rules, contact: st.contact, hashtags: st.hashtags }).slice(0, 5000);
   if (!text) throw new HttpError(502, 'AI chưa trả về nội dung, vui lòng thử lại', 'ai_empty');
   await audit(env, request, user.id, 'ai_written', brief.slice(0, 80) || '(viết lại)');
-  return json({ text, provider: PROVIDER_LABELS[provider] });
+  return json({ text, body: bodyText, provider: PROVIDER_LABELS[provider] });
 }

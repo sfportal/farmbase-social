@@ -268,8 +268,10 @@ export async function writeFromSource(request, env, user) {
     : `Dựa trên bài gốc dưới đây, viết một bài đăng Facebook mới, độ dài ${length}, bằng lời văn của doanh nghiệp. Diễn đạt lại, không chép nguyên câu dài của bài gốc, chỉ dùng thông tin có trong bài gốc.\n\nTiêu đề bài gốc: ${title}\nNội dung bài gốc:\n${source}`;
   const { text, provider } = await generate(env, { system: systemPrompt(rules, pageNames, st), prompt, maxTokens: 1200 });
   // Bài viết lại từ nguồn ngoài luôn ghi nguồn (quy định nội dung); liên hệ và hashtag theo quy định đăng bài.
-  let out = enforceStyle(tidy(text), { rules, contact: st.contact, hashtags: st.hashtags, source: mode === 'rewrite' ? u.toString() : '' }).slice(0, 4800);
+  const srcLine = mode === 'rewrite' ? u.toString() : '';
+  let out = enforceStyle(tidy(text), { rules, contact: st.contact, hashtags: st.hashtags, source: srcLine }).slice(0, 4800);
+  const bodyText = enforceStyle(tidy(text), { rules, strip: true, source: srcLine }).slice(0, 4800);
   if (!out) throw new HttpError(502, 'AI chưa trả về nội dung, vui lòng thử lại', 'ai_empty');
   await audit(env, request, user.id, 'ai_written', `${mode === 'share' ? 'Chia sẻ' : 'Viết lại'}: ${title.slice(0, 70)}`, { url: u.toString() });
-  return json({ text: out, link: mode === 'share' ? u.toString() : null, provider: PROVIDER_LABELS[provider] });
+  return json({ text: out, body: bodyText, link: mode === 'share' ? u.toString() : null, provider: PROVIDER_LABELS[provider] });
 }

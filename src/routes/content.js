@@ -107,7 +107,12 @@ export async function createContent(request, env, user) {
   const body = await readJson(request);
   const t = now();
   const mediaIds = await cleanMediaIds(env, body.media_ids);
-  const f = cleanFields(body, t, !!mediaIds);
+  // messages: nội dung riêng cho từng Trang (footer, lời kêu gọi, hashtag khác nhau); thiếu Trang nào thì dùng message chung.
+  const perPage = body.messages && typeof body.messages === 'object' ? body.messages : {};
+  for (const v of Object.values(perPage)) if (typeof v === 'string' && v.trim().length > MAX_MESSAGE) throw new HttpError(400, `Nội dung tối đa ${MAX_MESSAGE} ký tự`, 'too_long');
+  const firstVariant = Object.values(perPage).find((v) => typeof v === 'string' && v.trim());
+  const f = cleanFields({ ...body, message: (typeof body.message === 'string' && body.message.trim()) ? body.message : firstVariant || '' }, t, !!mediaIds);
+  const msgFor = (pageId) => (typeof perPage[pageId] === 'string' && perPage[pageId].trim() ? perPage[pageId].trim() : f.message);
   const action = ['draft', 'submit', 'publish'].includes(body.action) ? body.action : 'draft';
   if (action === 'publish' && !isManager(user)) throw new HttpError(403, 'Chỉ Quản lý hoặc Chủ hệ thống được đăng bài', 'forbidden');
   const allowed = await allowedPageIds(env, user);
@@ -122,7 +127,7 @@ export async function createContent(request, env, user) {
     const r = await env.DB.prepare(
       `INSERT INTO social_content (page_id, message, link, image_url, media_ids, scheduled_at, status, created_by, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id`
-    ).bind(pageId, f.message, f.link, f.image_url, mediaIds, f.scheduled_at, status, user.id, t, t).first();
+    ).bind(pageId, msgFor(pageId), f.link, f.image_url, mediaIds, f.scheduled_at, status, user.id, t, t).first();
     created.push(r.id);
   }
   await audit(env, request, user.id, action === 'submit' ? 'post_submitted' : 'post_created', snippet(f.message), { ids: created, pages: pageIds });
