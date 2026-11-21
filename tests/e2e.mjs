@@ -703,6 +703,12 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req('/api/content', { method: 'POST', body: { message: '', messages: { 111: 'Bản cho A', 222: 'Bản cho B' }, page_ids: ['111', '222'], action: 'draft' } });
   assert.equal(r.status, 201, JSON.stringify(r.data));
   assert.deepEqual(r.data.items.map((i) => [i.page_id, i.message]).sort(), [['111', 'Bản cho A'], ['222', 'Bản cho B']]);
+  // Tổng quan: số liệu hộp thư theo Trang, đúng phân quyền
+  r = await owner.req('/api/overview');
+  assert.equal(r.status, 200);
+  assert.ok(r.data.pages['111'].msg_in >= 1 && r.data.pages['111'].unread >= 0, JSON.stringify(r.data));
+  r = await cs.req('/api/overview');
+  assert.deepEqual(Object.keys(r.data.pages), ['111'], 'CSKH chỉ thấy Trang được giao');
   step('nguồn nội dung: thêm website và Fanpage, đọc bài, video, chia sẻ và AI viết lại có ghi nguồn, đúng phân quyền');
 }
 
