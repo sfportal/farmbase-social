@@ -76,6 +76,14 @@ const fakeGraph = createServer(async (req, res) => {
   const cv = u.pathname.match(/^\/v[\d.]+\/(\d+)\/conversations$/);
   if (cv) return res.end(JSON.stringify({ data: u.searchParams.get('user_id') === '901' ? [{ id: 't_1', participants: { data: [{ id: '901', name: 'Nguyễn Văn Khách' }, { id: cv[1], name: 'Trang' }] } }] : [] }));
   if (who && (u.searchParams.get('fields') || '').includes('name')) return res.end(JSON.stringify({ id: who[1], name: `Khách ${who[1]}`, profile_pic: `${BASE}/icons/icon.svg` }));
+  // Số lượt thích, theo dõi của Trang; lượt xem từng bài (chỉ số mới post_media_view).
+  const pinfo = u.pathname.match(/^\/v[\d.]+\/(\d+)$/);
+  if (pinfo && (u.searchParams.get('fields') || '').includes('fan_count') && !(u.searchParams.get('fields') || '').includes('name')) return res.end(JSON.stringify({ id: pinfo[1], fan_count: 130, followers_count: 160 }));
+  const pvw = u.pathname.match(/^\/v[\d.]+\/(\d+)_(\d+)\/insights$/);
+  if (pvw) {
+    if (u.searchParams.get('metric') !== 'post_media_view') { res.statusCode = 400; return res.end('{"error":{"message":"(#100) invalid metric","code":100}}'); }
+    return res.end(JSON.stringify({ data: [{ name: 'post_media_view', period: 'lifetime', values: [{ value: 100 * Number(pvw[2]) }] }] }));
+  }
   // Page Insights: chỉ 2 chỉ số còn dùng được, các chỉ số khác Facebook báo lỗi (giống khi bị bỏ).
   const pin = u.pathname.match(/^\/v[\d.]+\/(\d+)\/insights$/);
   if (pin) {
@@ -521,6 +529,12 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.ok(!r.data.metrics.page_views_total, 'chỉ số lỗi thì bỏ qua');
   assert.ok(r.data.errors.some((e) => e.source === 'page_views_total'));
   assert.ok(r.data.posts.posts >= 1);
+  assert.deepEqual(r.data.stats, { fan_count: 130, followers_count: 160 });
+  assert.ok(r.data.today.today.messages_in >= 2, 'hôm nay có tin nhắn'); assert.equal(r.data.today.yesterday.messages_in, 0);
+  assert.equal(r.data.heat.length, 7); assert.equal(r.data.heat[0].length, 24);
+  assert.equal(r.data.heat.flat().reduce((a, b) => a + b, 0), r.data.inbox.messages_in + r.data.inbox.comments_in, 'khung giờ đếm đủ tin của khách');
+  assert.equal(r.data.views_metric, 'post_media_view');
+  assert.ok(r.data.recent_posts.length >= 1 && r.data.recent_posts[0].views > 0, 'lượt xem từng bài');
   r = await owner.req('/api/report?page_id=111&days=90');
   assert.equal(r.status, 200); assert.equal(r.data.metrics.page_post_engagements.prev, null);
   r = await owner.req('/api/report?page_id=111&days=12');

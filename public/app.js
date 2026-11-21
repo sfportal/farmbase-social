@@ -908,7 +908,7 @@ function renderReport(d) {
   const ib = d.inbox; const pv = d.inbox_prev; const m = d.metrics;
   const has = (k) => m[k] !== undefined;
   const stat = (label, n, sub) => `<div class="card stat"><div class="muted small">${label}</div><div class="n">${n}</div><div class="muted small">${sub || '&nbsp;'}</div></div>`;
-  const insightCards = ['page_post_engagements', 'page_impressions_unique', 'page_media_view', 'page_views_total', 'page_total_actions', 'page_daily_follows_unique']
+  const insightCards = ['page_post_engagements', 'page_impressions_unique', 'page_media_view', 'page_views_total', 'page_total_actions']
     .filter(has).map((k) => stat(esc(m[k].label), fmtNum(m[k].total), delta(m[k].total, m[k].prev))).join('');
   const series = REP_SERIES.filter(([k]) => !k.startsWith('page_') || has(k));
   if (!series.some(([k]) => k === repState.metric)) repState.metric = 'messages_in';
@@ -937,8 +937,43 @@ function renderReport(d) {
     insightErr ? 'Chưa lấy được lượt xem, người tiếp cận, người theo dõi mới từ Facebook: Chủ hệ thống cần kết nối lại Fanpage để cấp thêm quyền xem thống kê Trang.' : '',
     d.errors.some((e) => e.source === 'posts') ? `Chưa lấy được bài đăng: ${esc(d.errors.find((e) => e.source === 'posts').message)}` : '',
   ].filter(Boolean).map((t) => `<li>${t}</li>`).join('');
+  // Hôm nay so với hôm qua cùng giờ.
+  const td = d.today;
+  const cmp = (k, label) => {
+    const a = td.today[k]; const b = td.yesterday_same_time[k];
+    return stat(label, fmtNum(a), `${delta(a, b).replace('so với kỳ trước', 'so với hôm qua') || `Hôm qua cùng giờ: ${fmtNum(b)}`} · cả ngày hôm qua ${fmtNum(td.yesterday[k])}`);
+  };
+  const todayBox = `<h2 class="sec">Hôm nay so với hôm qua <span class="muted small" style="font-weight:400">(tính tới ${td.hour} giờ, so với cùng giờ hôm qua)</span></h2>
+    <div class="grid stats4">${cmp('messages_in', 'Tin nhắn hôm nay')}${cmp('comments_in', 'Bình luận hôm nay')}${cmp('new_customers', 'Khách mới hôm nay')}${cmp('replies', 'Trang trả lời hôm nay')}</div>`;
+  const follows = m.page_daily_follows_unique;
+  const unf = m.page_daily_unfollows_unique;
+  const pageCards = (d.stats.fan_count !== null ? stat('Lượt thích Trang', fmtNum(d.stats.fan_count), 'Số hiện tại') : '')
+    + (d.stats.followers_count !== null ? stat('Người theo dõi', fmtNum(d.stats.followers_count), follows ? `+${fmtNum(follows.total)} trong kỳ${unf ? `, bỏ theo dõi ${fmtNum(unf.total)}` : ''}` : 'Số hiện tại') : '');
+  // Khung giờ: lưới thứ × giờ, màu một sắc đậm dần theo số tương tác.
+  const WD = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật'];
+  const hmax = Math.max(0, ...d.heat.flat());
+  const hourTot = Array.from({ length: 24 }, (_, h) => d.heat.reduce((s2, r) => s2 + r[h], 0));
+  const dayTot = d.heat.map((r) => r.reduce((a, b) => a + b, 0));
+  const topH = hourTot.indexOf(Math.max(...hourTot)); const topD = dayTot.indexOf(Math.max(...dayTot));
+  const lvl = (v) => (!v || !hmax ? 0 : Math.min(4, Math.ceil((v / hmax) * 4)));
+  const heat = `<div class="card"><h2>Khung giờ khách tương tác</h2>
+    <p class="muted small" style="margin-top:0">${hmax ? `Khách nhắn tin, bình luận nhiều nhất lúc <b>${topH}–${topH + 1} giờ</b> và vào <b>${WD[topD]}</b>. Nên đăng bài và trực hộp thư trước khung giờ này.` : 'Chưa có tin nhắn, bình luận nào trong kỳ để tính khung giờ.'}</p>
+    <div class="tscroll"><div class="heat" role="img" aria-label="Số tin nhắn và bình luận của khách theo thứ và giờ">
+      <span></span>${Array.from({ length: 24 }, (_, h) => `<span class="hh">${h % 3 === 0 ? h : ''}</span>`).join('')}
+      ${d.heat.map((r, i) => `<span class="hd">${WD[i].replace('Thứ ', 'T').replace('Chủ Nhật', 'CN')}</span>${r.map((v, h) => `<span class="hc l${lvl(v)}" title="${WD[i]}, ${h}–${h + 1} giờ: ${v} tương tác"></span>`).join('')}`).join('')}
+    </div></div>
+    <div class="row muted small heat-key">Ít <span class="hc l0"></span><span class="hc l1"></span><span class="hc l2"></span><span class="hc l3"></span><span class="hc l4"></span> Nhiều · tính trên tin nhắn và bình luận của khách trong kỳ</div></div>`;
+  // Hiệu quả từng bài gần đây.
+  const vLabel = d.views_metric === 'post_impressions_unique' ? 'người tiếp cận' : 'lượt xem';
+  const recent = d.recent_posts.length ? `<div class="card"><h2>Bài đăng gần đây</h2><div class="rposts">${d.recent_posts.map((p) => `<a class="rpost" ${p.permalink_url ? `href="${esc(p.permalink_url)}" target="_blank" rel="noopener"` : ''}>
+      ${p.picture ? `<img src="${esc(p.picture)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<div class="rtext">${esc(p.message || '(Không có chữ)')}</div>`}
+      <div class="rbody"><div class="muted small">${fmtTime(p.created_time)}</div>
+        ${p.views !== null ? `<div class="rv"><b>${fmtNum(p.views)}</b> ${vLabel}</div>` : `<div class="rv"><b>${fmtNum(p.engagement)}</b> tương tác</div>`}
+        <div class="muted small">👍 ${fmtNum(p.reactions)} · 💬 ${fmtNum(p.comments)} · ↗ ${fmtNum(p.shares)}</div></div></a>`).join('')}</div>
+      ${d.views_metric ? '' : '<p class="muted small" style="margin-bottom:0">Lượt xem từng bài sẽ hiện sau khi Chủ hệ thống kết nối lại Fanpage và cấp quyền xem thống kê Trang.</p>'}</div>` : '';
   box.innerHTML = `<p class="muted small" style="margin-top:0">${esc(d.page.name)} · từ ${d.from.split('-').reverse().join('/')} đến ${d.to.split('-').reverse().join('/')}</p>
-    <h2 class="sec">Tin nhắn và bình luận</h2>
+    ${todayBox}
+    <h2 class="sec">Tin nhắn và bình luận trong kỳ</h2>
     <div class="grid stats4">
       ${stat('Tin nhắn từ khách', fmtNum(ib.messages_in), delta(ib.messages_in, pv.messages_in))}
       ${stat('Bình luận của khách', fmtNum(ib.comments_in), delta(ib.comments_in, pv.comments_in))}
@@ -947,10 +982,11 @@ function renderReport(d) {
     </div>
     <h2 class="sec">Nội dung và Trang</h2>
     <div class="grid stats4">
+      ${pageCards}
       ${d.posts ? stat('Bài đăng', fmtNum(d.posts.posts), `${fmtNum(d.posts.reactions)} cảm xúc, ${fmtNum(d.posts.post_comments)} bình luận, ${fmtNum(d.posts.shares)} chia sẻ`) : ''}
       ${insightCards}
     </div>
-    ${chart}${table}<div class="card"><ul class="muted small" style="margin:0;padding-left:18px">${notes}</ul></div>`;
+    ${chart}${heat}${recent}${table}<div class="card"><ul class="muted small" style="margin:0;padding-left:18px">${notes}</ul></div>`;
   box.querySelectorAll('[data-m]').forEach((b) => { b.onclick = () => { repState.metric = b.dataset.m; renderReport(d); }; });
   box.querySelectorAll('.bar').forEach((b) => { b.onclick = () => toast(b.dataset.tip); });
 }

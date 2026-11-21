@@ -72,7 +72,7 @@ async function postsSince(env, pageId, token, since) {
   const out = [];
   let params = {
     access_token: token, since: String(since), limit: '100',
-    fields: 'id,created_time,shares,reactions.summary(total_count).limit(0),comments.summary(total_count).filter(stream).limit(0)',
+    fields: 'id,created_time,message,full_picture,permalink_url,status_type,shares,reactions.summary(total_count).limit(0),comments.summary(total_count).filter(stream).limit(0)',
   };
   for (let i = 0; i < 3; i++) {
     const d = await graph(env, `${pageId}/posts`, params);
@@ -89,6 +89,34 @@ async function insight(env, pageId, token, metric, since, until) {
   const values = d.data?.[0]?.values || [];
   // end_time là cuối ngày theo giờ của Facebook: ngày của số liệu là ngày trước end_time.
   return values.map((v) => ({ date: dayKey(Math.floor(Date.parse(v.end_time) / 1000) - DAY), value: typeof v.value === 'number' ? v.value : Number(v.value) || 0 }));
+}
+
+// Lượt xem từng bài: thử post_media_view (chỉ số mới), không được thì post_impressions_unique; dò trên bài đầu rồi dùng cho cả nhóm.
+async function postViews(env, token, posts) {
+  if (!posts.length) return { metric: null, views: {} };
+  const one = async (id, metric) => {
+    const d = await graph(env, `${id}/insights`, { access_token: token, metric });
+    const v = d.data?.[0]?.values?.[0]?.value;
+    return typeof v === 'number' ? v : null;
+  };
+  let metric = null; const views = {};
+  for (const m of ['post_media_view', 'post_impressions_unique']) {
+    try { const v = await one(posts[0].id, m); if (v !== null) { metric = m; views[posts[0].id] = v; break; } } catch { /* thử chỉ số sau */ }
+  }
+  if (!metric) return { metric: null, views };
+  const rest = await Promise.allSettled(posts.slice(1).map((p) => one(p.id, metric)));
+  rest.forEach((r, i) => { if (r.status === 'fulfilled' && r.value !== null) views[posts[i + 1].id] = r.value; });
+  return { metric, views };
+}
+
+function countInbox(msgs, convs, from, to) {
+  const s = { messages_in: 0, comments_in: 0, new_customers: 0, replies: 0 };
+  for (const m of msgs) {
+    if (m.created_at < from || m.created_at >= to) continue;
+    if (m.direction === 'in') { if (m.channel === 'comment') s.comments_in++; else s.messages_in++; } else s.replies++;
+  }
+  for (const c of convs) if (c.created_at >= from && c.created_at < to) s.new_customers++;
+  return s;
 }
 
 // GET /api/report?page_id=&days=30
@@ -122,6 +150,21 @@ export async function pageReport(request, env, user) {
     else { d.replies++; if (m.auto) d.auto_replies++; }
   }
   for (const c of cur.convs) { const d = byDate.get(dayKey(c.created_at)); if (d) { if (c.kind === 'message') d.new_chats++; else d.new_commenters++; } }
+  // Hôm nay (tới giờ hiện tại) so với hôm qua cùng khung giờ và cả ngày hôm qua.
+  const all = { msgs: [...prev.msgs, ...cur.msgs], convs: [...prev.convs, ...cur.convs] };
+  const today = {
+    today: countInbox(all.msgs, all.convs, todayStart, nowTs + 1),
+    yesterday_same_time: countInbox(all.msgs, all.convs, todayStart - DAY, nowTs + 1 - DAY),
+    yesterday: countInbox(all.msgs, all.convs, todayStart - DAY, todayStart),
+    hour: new Date((nowTs + TZ) * 1000).getUTCHours(),
+  };
+  // Khung giờ khách tương tác: tin nhắn và bình luận của khách theo thứ (0 = thứ Hai) và giờ, giờ Việt Nam.
+  const heat = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const m of cur.msgs) {
+    if (m.direction !== 'in') continue;
+    const d = new Date((m.created_at + TZ) * 1000);
+    heat[(d.getUTCDay() + 6) % 7][d.getUTCHours()]++;
+  }
   const first = await env.DB.prepare(
     'SELECT MIN(m.created_at) AS t FROM social_messages m JOIN social_conversations c ON c.id = m.conversation_id WHERE c.page_id = ?'
   ).bind(pageId).first();
@@ -130,14 +173,32 @@ export async function pageReport(request, env, user) {
   const errors = [];
   const metrics = {};
   let postTotals = null;
+  let recent = [];
+  let viewsMetric = null;
+  const stats = { fan_count: null, followers_count: null };
   if (page.access_token_enc && page.status !== 'disconnected') {
     const token = await decryptSecret(page.access_token_enc, env.TOKEN_KEY);
     const span = days <= 30 ? prevFrom : from; // Facebook cho tối đa khoảng 90 ngày mỗi lần
-    const [posts, ...ins] = await Promise.allSettled([
+    const [info, posts, ...ins] = await Promise.allSettled([
+      graph(env, pageId, { access_token: token, fields: 'fan_count,followers_count' }),
       postsSince(env, pageId, token, from),
       ...Object.keys(INSIGHT_METRICS).map((m) => insight(env, pageId, token, m, span, to)),
     ]);
+    if (info.status === 'fulfilled') {
+      stats.fan_count = info.value.fan_count ?? null; stats.followers_count = info.value.followers_count ?? null;
+      await env.DB.prepare('UPDATE social_pages SET fan_count = ?, followers_count = ?, stats_at = ? WHERE id = ?').bind(stats.fan_count, stats.followers_count, nowTs, pageId).run();
+    }
     if (posts.status === 'fulfilled') {
+      // Hiệu quả từng bài gần đây (tối đa 8 bài mới nhất trong kỳ).
+      const top = posts.value.slice(0, 8);
+      const pv = await postViews(env, token, top);
+      viewsMetric = pv.metric;
+      recent = top.map((p) => {
+        const r = p.reactions?.summary?.total_count ?? 0; const c = p.comments?.summary?.total_count ?? 0; const sh = p.shares?.count ?? 0;
+        const text = p.message || '';
+        return { id: p.id, created_time: Math.floor(Date.parse(p.created_time) / 1000), message: text.length > 140 ? `${text.slice(0, 140)}…` : text,
+          picture: p.full_picture || null, permalink_url: p.permalink_url || null, reactions: r, comments: c, shares: sh, engagement: r + c + sh, views: pv.views[p.id] ?? null };
+      });
       postTotals = { posts: 0, reactions: 0, post_comments: 0, shares: 0 };
       for (const p of posts.value) {
         const d = byDate.get(dayKey(Math.floor(Date.parse(p.created_time) / 1000))); if (!d) continue;
@@ -171,6 +232,11 @@ export async function pageReport(request, env, user) {
     inbox: summarizeInbox(cur),
     inbox_prev: summarizeInbox(prev),
     posts: postTotals,
+    stats,
+    today,
+    heat,
+    recent_posts: recent,
+    views_metric: viewsMetric,
     metrics,
     errors,
   });
