@@ -236,3 +236,21 @@ details summary { cursor: pointer; color: var(--leaf); margin-top: 10px; }
 }
 .ads-head > .grow { flex: 1 1 260px; }
 #cd > .grid { margin-top: 16px; }
+
+/* Báo cáo */
+.filters.f3 { grid-template-columns: 2fr 1fr 1fr auto; }
+h2.sec { font-size: 15px; margin: 20px 0 10px; }
+.delta { color: var(--muted); }
+#rep > .card, #rep > .grid + .card { margin-top: 16px; }
+.bars.dense { gap: 1px; }
+.tscroll { overflow-x: auto; }
+table.rep td:nth-child(n+2), table.rep th:nth-child(n+2) { text-align: right; white-space: nowrap; }
+table.rep tr.total td { border-bottom: 0; }
+@media (max-width: 640px) {
+  .filters.f3 { grid-template-columns: 1fr 1fr; }
+  .filters.f3 > div:first-child { grid-column: 1 / -1; }
+  table.rep td:nth-child(n+2) { text-align: left; display: flex; justify-content: space-between; gap: 12px; }
+  table.rep td[data-l]::before { content: attr(data-l); color: var(--muted); font-size: 13px; }
+}
+#rep > details.card { margin-top: 16px; }
+#rep details.card > summary { margin: 0 0 8px; color: var(--fg); }

@@ -18,6 +18,7 @@ Chạy trên Cloudflare Workers + D1 (gói miễn phí; dùng chung D1 `farmbase
 | 3 | AI gợi ý câu trả lời | Chưa làm |
 | Thêm | Quảng cáo: xem tài khoản quảng cáo, chiến dịch, ngân sách, chi tiêu, tin nhắn, chi phí mỗi kết quả theo khoảng thời gian (chỉ đọc, quyền `ads_read`) | Xong |
 | Thêm | Quảng cáo: tạm dừng, bật lại chiến dịch, đổi ngân sách | Chưa làm |
+| Thêm | Báo cáo hiệu quả Fanpage theo ngày, tuần (7, 15, 30, 90 ngày) | Xong |
 | 4 | CRM mini, ghi đơn, kho kiến thức AI, báo cáo tuần | Chưa làm |
 
 ## API
@@ -58,6 +59,7 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | GET | `/api/ads/accounts`: tài khoản quảng cáo của người kết nối Facebook (dùng mã người dùng dài hạn lưu khi kết nối) | Chủ hệ thống, Quản lý |
 | GET | `/api/ads/accounts/:id/campaigns?preset=today\|yesterday\|last_7d\|last_30d\|this_month\|last_month`: chiến dịch, ngân sách, chi tiêu, kết quả và tổng | Chủ hệ thống, Quản lý |
 | GET | `/api/ads/campaigns/:id?preset=`: chi tiết chiến dịch: tổng, mọi loại kết quả, chi tiêu theo ngày, nhóm quảng cáo, mẫu quảng cáo, độ tuổi và giới tính, nền tảng (`preset` thêm `maximum` = toàn thời gian) | Chủ hệ thống, Quản lý |
+| GET | `/api/report?page_id=&days=7\|15\|30\|90`: báo cáo Fanpage theo ngày: tin nhắn, bình luận, khách mới, trả lời, thời gian trả lời (từ hộp thư), bài đăng và tương tác, thống kê Trang (Page Insights, quyền `read_insights`), so với kỳ trước | Fanpage được giao |
 | GET | `/api/fb/status`, `/api/fb/connect`, `/api/fb/callback` | Chủ hệ thống |
 
 ## Chạy thử trên máy
