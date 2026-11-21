@@ -105,7 +105,7 @@ async function discover(u) {
     const list = JSON.parse(r.text);
     if (parseWp(list).length) return { feed_url: new URL('/wp-json/wp/v2/posts?per_page=20&_embed=1', u.origin).toString(), feed_type: 'wp', title: siteTitle };
   } catch { /* không phải WordPress */ }
-  for (const p of ['/feed', '/rss', '/rss.xml', '/feed.xml', '/atom.xml', '/index.xml']) { const f = await tryFeed(new URL(p, u.origin).toString()); if (f) return { ...f, title: siteTitle || f.title }; }
+  for (const p of ['/feed', '/rss', '/rss.xml', '/feed.xml', '/feed.rss', '/home.rss', '/atom.xml', '/index.xml']) { const f = await tryFeed(new URL(p, u.origin).toString()); if (f) return { ...f, title: siteTitle || f.title }; }
   throw new HttpError(400, 'Website này chưa có RSS hoặc dữ liệu bài viết công khai để đọc. Quý khách thử dán địa chỉ trang RSS (thường là /feed hoặc /rss) của website.', 'no_feed');
 }
 
