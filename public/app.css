@@ -271,3 +271,12 @@ table.rep tr.total td { border-bottom: 0; }
 .rpost .rv { font-size: 15px; margin: 2px 0; }
 .rpost .rv b { font-size: 20px; }
 @media (max-width: 640px) { .rposts { grid-template-columns: 1fr 1fr; } }
+
+/* Nguồn nội dung */
+.srcgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.srcitem { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.srcitem img, .srcitem .noimg { width: 100%; aspect-ratio: 16/9; object-fit: cover; background: var(--sprout, #eef2ee); display: block; }
+.srcitem .sbody { padding: 10px 12px; flex: 1; min-width: 0; }
+.srcitem h3 { font-size: 15px; margin: 6px 0 4px; line-height: 1.35; overflow-wrap: anywhere; }
+.srcitem p { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.srcitem .sact { padding: 0 12px 12px; gap: 6px; flex-wrap: wrap; }

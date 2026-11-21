@@ -99,6 +99,7 @@ const I = {
   report: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   ads: '<path d="M3 10v4l11 5V5z"/><path d="M14 8a4 4 0 0 1 0 8M6 14.5 7.5 20h3l-1.3-4.3"/>',
   rule: '<path d="M5 3h11l3 3v15H5z"/><path d="m8.5 12 2 2 4-4M8.5 17h7"/>',
+  src: '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/><path d="m15 15 2 2 3-3"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
 
@@ -108,6 +109,7 @@ function navItems() {
     { r: 'tong-quan', label: 'Tổng quan', ic: 'home' },
     { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox' },
     { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal' },
+    ...(me.role !== 'agent' ? [{ r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src' }] : []),
     { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule' },
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
@@ -439,8 +441,9 @@ async function uploadFile(file) {
   return data;
 }
 
-function contentForm(pages, item, perms) {
+function contentForm(pages, item, perms, pre) {
   const editing = !!item;
+  const v = item || pre || {};
   const pagePick = editing
     ? `<div class="muted">${esc(item.page_name)}</div>`
     : `<div class="pick">${pages.map((p) => `<label class="check"><input type="checkbox" name="pg" value="${esc(p.id)}" ${pages.length === 1 ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')}</div>`;
@@ -460,16 +463,16 @@ function contentForm(pages, item, perms) {
           <a class="small" href="#/quy-dinh" target="_blank" rel="noopener">Xem quy định</a></div>
         <div id="aimsg"></div>
       </details>
-      <label for="msg">Nội dung</label><textarea id="msg" rows="7" maxlength="5000" placeholder="Viết nội dung bài đăng…">${esc(item?.message || '')}</textarea>
+      <label for="msg">Nội dung</label><textarea id="msg" rows="7" maxlength="5000" placeholder="Viết nội dung bài đăng…">${esc(v.message || '')}</textarea>
       <div class="muted small" id="cnt"></div>
-      <label for="lnk">Liên kết (không bắt buộc)</label><input id="lnk" type="url" placeholder="https://farmbase.vn/…" value="${esc(item?.link || '')}">
+      <label for="lnk">Liên kết (không bắt buộc)</label><input id="lnk" type="url" placeholder="https://farmbase.vn/…" value="${esc(v.link || '')}">
       <label>Ảnh hoặc video</label>
       ${perms.media_enabled
         ? `<div class="media-pick"><div class="media-list" id="mlist"></div>
             <label class="btn ghost sm upl">Tải ảnh, video lên<input id="mfile" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime" multiple hidden></label>
             <div class="muted small">Tối đa 10 ảnh (mỗi ảnh 10 MB) hoặc 1 video MP4 (95 MB). Có ảnh hoặc video thì nội dung làm chú thích.</div><div id="mmsg"></div></div>`
         : '<div class="muted small">Chưa bật kho lưu ảnh, video. Tạm thời dán đường dẫn ảnh công khai bên dưới.</div>'}
-      <label for="img">Hoặc địa chỉ ảnh có sẵn (không bắt buộc)</label><input id="img" type="url" placeholder="https://… .jpg" value="${esc(item?.image_url || '')}">
+      <label for="img">Hoặc địa chỉ ảnh có sẵn (không bắt buộc)</label><input id="img" type="url" placeholder="https://… .jpg" value="${esc(v.image_url || '')}">
       <label for="when">Thời gian đăng</label><input id="when" type="datetime-local" value="${toLocalInput(item?.scheduled_at)}">
       <div class="muted small">${editing && item.status === 'scheduled' ? 'Bài đang hẹn giờ trên Facebook: khi lưu, lịch cũ được thay bằng nội dung và giờ mới. Giờ đăng cách hiện tại ít nhất 10 phút.' : 'Để trống: đăng ngay khi duyệt. Hẹn giờ: cách hiện tại ít nhất 10 phút, tối đa 30 ngày; Facebook tự đăng đúng giờ.'}</div>
       <div id="fmsg"></div>
@@ -477,8 +480,8 @@ function contentForm(pages, item, perms) {
     </form>`;
 }
 
-function openContentForm(pages, item, perms) {
-  modal(contentForm(pages, item, perms), (m, close) => {
+function openContentForm(pages, item, perms, pre) {
+  modal(contentForm(pages, item, perms, pre), (m, close) => {
     const f = m.querySelector('#cf');
     const cnt = m.querySelector('#cnt');
     const upd = () => (cnt.textContent = `${f.msg.value.length}/5000 ký tự`);
@@ -556,7 +559,7 @@ function openContentForm(pages, item, perms) {
         close();
         const failed = items.filter((i) => i.status === 'failed');
         toast(failed.length ? `Có ${failed.length} bài đăng lỗi, xem chi tiết trong danh sách` : { draft: 'Đã lưu nháp', submit: 'Đã gửi duyệt', publish: 'Đã gửi lên Facebook', reschedule: 'Đã cập nhật bài hẹn giờ' }[act]);
-        loadCalendar();
+        if (document.getElementById('cal')) loadCalendar();
       } catch (e) {
         msgBox.innerHTML = `<div class="alert err">${esc(e.message)}</div>`;
         m.querySelectorAll('button').forEach((x) => (x.disabled = false));
@@ -873,6 +876,121 @@ function groupWeeks(daily) {
     w.end = d.date; w.days.push(d);
   }
   return weeks;
+}
+
+// ---------- Nguồn nội dung: website và Fanpage để chọn bài chia sẻ hoặc cho AI viết lại ----------
+const SRC_TYPE = { article: 'Bài viết', post: 'Bài đăng', video: 'Video' };
+let srcState = { id: null, type: '' };
+async function viewSources() {
+  layout('nguon-noi-dung', 'Nguồn nội dung', 'Xem bài viết, bài đăng, video từ website và Fanpage để chia sẻ hoặc cho AI viết bài mới', '<div class="muted">Đang tải…</div>', '<button class="btn" id="addsrc">Thêm nguồn</button>');
+  const [{ sources, ai_provider }, { pages }] = await Promise.all([api('/api/sources'), api('/api/pages')]);
+  const usable = pages.filter((p) => p.status !== 'disconnected');
+  const v = document.getElementById('view');
+  const aiNote = ai_provider
+    ? `<div class="muted small">AI đang dùng: <b>${esc(ai_provider)}</b>.</div>`
+    : `<div class="muted small">Chưa bật AI.${me.role === 'owner' ? ' Để dùng Claude hoặc DeepSeek, Quý khách thêm biến bí mật ANTHROPIC_API_KEY hoặc DEEPSEEK_API_KEY trong Cloudflare (Worker farmbase-social, Settings, Variables and Secrets).' : ''}</div>`;
+  if (!sources.length) {
+    v.innerHTML = `<div class="card"><p style="margin-top:0">Chưa có nguồn nào. Bấm <b>Thêm nguồn</b> để thêm website (ví dụ farmbase.vn, trang tin nông nghiệp) hoặc Fanpage đã kết nối.</p>${aiNote}</div>`;
+  } else {
+    if (!sources.some((s) => String(s.id) === String(srcState.id))) srcState.id = sources[0].id;
+    v.innerHTML = `<div class="card filters f3">
+        <div><label for="ssel">Nguồn</label><select id="ssel">${sources.map((s) => `<option value="${s.id}">${s.kind === 'fanpage' ? 'Fanpage: ' : 'Website: '}${esc(s.name)}</option>`).join('')}</select></div>
+        <div><label for="stype">Loại</label><select id="stype"><option value="">Tất cả</option><option value="article">Bài viết</option><option value="post">Bài đăng</option><option value="video">Video</option></select></div>
+        <div class="end row"><button class="btn ghost" id="sreload">Tải lại</button>${me.role === 'owner' || me.role === 'manager' ? '<button class="btn ghost danger" id="srm">Bỏ nguồn</button>' : ''}</div></div>
+      <div class="card">${aiNote}<div class="muted small">Chia sẻ: AI viết lời giới thiệu ngắn kèm liên kết bài gốc. AI viết bài: AI đọc bài gốc và viết bài mới, cuối bài luôn ghi "Nguồn:". Bài chỉ lên Fanpage sau khi Quý khách duyệt.</div></div>
+      <div id="sitems"></div>`;
+    const sel = document.getElementById('ssel'); const ty = document.getElementById('stype');
+    sel.value = String(srcState.id); ty.value = srcState.type;
+    sel.onchange = () => { srcState.id = sel.value; loadSourceItems(usable); };
+    ty.onchange = () => { srcState.type = ty.value; loadSourceItems(usable); };
+    document.getElementById('sreload').onclick = () => loadSourceItems(usable);
+    const rm = document.getElementById('srm');
+    if (rm) rm.onclick = () => removeSource(sources.find((s) => String(s.id) === String(srcState.id)));
+    loadSourceItems(usable);
+  }
+  document.getElementById('addsrc').onclick = () => openAddSource(usable);
+}
+
+function openAddSource(pages) {
+  modal(`<h2>Thêm nguồn nội dung</h2>
+    <form id="sf" novalidate>
+      <label>Loại nguồn</label>
+      <div class="pick"><label class="check"><input type="radio" name="kind" value="website" checked> Website</label><label class="check"><input type="radio" name="kind" value="fanpage"> Fanpage đã kết nối</label></div>
+      <div id="sfw"><label for="surl">Địa chỉ website</label><input id="surl" type="url" placeholder="https://farmbase.vn">
+        <div class="muted small">Hệ thống tự tìm RSS hoặc dữ liệu bài viết công khai của website. Có thể dán thẳng địa chỉ RSS.</div></div>
+      <div id="sfp" hidden><label for="spg">Fanpage</label>${pages.length ? `<select id="spg">${pages.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>` : '<div class="muted">Chưa có Fanpage nào được kết nối.</div>'}
+        <div class="muted small">Facebook chỉ cho đọc bài của Fanpage mà Quý khách quản lý và đã kết nối vào hệ thống.</div></div>
+      <div id="sfmsg"></div>
+      <div class="actions"><button type="button" class="btn ghost" data-close>Hủy</button><button type="button" class="btn" id="sfgo">Thêm</button></div>
+    </form>`, (m, close) => {
+    const f = m.querySelector('#sf');
+    const sw = () => { const fp = f.querySelector('input[name=kind]:checked').value === 'fanpage'; m.querySelector('#sfw').hidden = fp; m.querySelector('#sfp').hidden = !fp; };
+    f.querySelectorAll('input[name=kind]').forEach((r) => (r.onchange = sw));
+    m.querySelector('[data-close]').onclick = close;
+    m.querySelector('#sfgo').onclick = async (e) => {
+      const kind = f.querySelector('input[name=kind]:checked').value;
+      const body = kind === 'website' ? { kind, url: f.surl.value.trim() } : { kind, page_id: f.spg?.value };
+      const box = m.querySelector('#sfmsg');
+      if (kind === 'website' && !body.url) { box.innerHTML = '<div class="alert err">Vui lòng nhập địa chỉ website.</div>'; return; }
+      if (kind === 'fanpage' && !body.page_id) { box.innerHTML = '<div class="alert err">Chưa có Fanpage để chọn.</div>'; return; }
+      e.target.disabled = true; box.innerHTML = '<div class="muted small">Đang kiểm tra nguồn…</div>';
+      try { const r = await api('/api/sources', { method: 'POST', body }); srcState.id = r.id; close(); toast('Đã thêm nguồn'); viewSources(); }
+      catch (err) { box.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
+    };
+  });
+}
+
+async function removeSource(s) {
+  if (!s) return;
+  if (!(await confirmBox('Bỏ nguồn này?', `"${s.name}" sẽ không còn trong danh sách nguồn. Bài trên website và Fanpage không bị ảnh hưởng.`, 'Bỏ nguồn', true))) return;
+  try { await api(`/api/sources/${s.id}`, { method: 'DELETE' }); srcState.id = null; toast('Đã bỏ nguồn'); viewSources(); } catch (e) { toast(e.message); }
+}
+
+async function loadSourceItems(pages) {
+  const box = document.getElementById('sitems');
+  if (!box) return;
+  box.innerHTML = '<div class="muted">Đang đọc nội dung…</div>';
+  let d;
+  try { d = await api(`/api/sources/${encodeURIComponent(srcState.id)}/items`, { quiet: true }); } catch (e) { box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+  const items = d.items.filter((i) => !srcState.type || i.type === srcState.type);
+  if (!items.length) { box.innerHTML = '<div class="card"><p class="muted" style="margin:0">Chưa có nội dung phù hợp.</p></div>'; return; }
+  box.innerHTML = `<div class="srcgrid">${items.map((it, i) => `<article class="srcitem">
+      ${it.image ? `<img src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
+      <div class="sbody"><div class="muted small"><span class="tag">${SRC_TYPE[it.type] || 'Bài viết'}</span> ${it.date ? fmtTime(it.date) : ''}</div>
+        <h3>${esc(it.title)}</h3><p class="muted small">${esc(it.summary || '')}</p></div>
+      <div class="row sact"><button class="btn sm" data-share="${i}">Chia sẻ</button><button class="btn ghost sm" data-rew="${i}">AI viết bài</button><a class="btn ghost sm" href="${esc(it.url)}" target="_blank" rel="noopener">Mở</a></div>
+    </article>`).join('')}</div>`;
+  const run = (it, mode) => {
+    if (!pages.length) return toast(me.role === 'owner' ? 'Vui lòng kết nối Fanpage trước' : 'Quý khách chưa được giao Fanpage nào');
+    modal(`<h2>${mode === 'share' ? 'Chia sẻ bài này' : 'AI viết bài mới từ bài này'}</h2>
+      <p class="muted small">${esc(it.title)}</p>
+      <label>Đăng lên Fanpage</label><div class="pick">${pages.map((p) => `<label class="check"><input type="checkbox" name="wpg" value="${esc(p.id)}" ${pages.length === 1 ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')}</div>
+      ${mode === 'rewrite' ? '<label for="wlen">Độ dài</label><select id="wlen"><option value="ngan">Ngắn</option><option value="vua" selected>Vừa</option><option value="dai">Dài</option></select>' : ''}
+      <div id="wmsg"></div>
+      <div class="actions"><button type="button" class="btn ghost" data-close>Hủy</button><button type="button" class="btn" id="wgo">Viết bằng AI</button></div>`, (m, close) => {
+      m.querySelector('[data-close]').onclick = close;
+      m.querySelector('#wgo').onclick = async (e) => {
+        const page_ids = [...m.querySelectorAll('input[name=wpg]:checked')].map((x) => x.value);
+        const box2 = m.querySelector('#wmsg');
+        if (!page_ids.length) { box2.innerHTML = '<div class="alert err">Vui lòng chọn ít nhất một Fanpage.</div>'; return; }
+        e.target.disabled = true; box2.innerHTML = '<div class="muted small">AI đang viết, khoảng 10 đến 30 giây…</div>';
+        try {
+          const [r, c] = await Promise.all([
+            api('/api/sources/write', { method: 'POST', body: { url: it.url, title: it.title, summary: it.summary, mode, length: m.querySelector('#wlen')?.value || 'vua', page_ids } }),
+            api('/api/content?status=draft').catch(() => ({})),
+          ]);
+          close();
+          const chosen = pages.filter((p) => page_ids.includes(p.id));
+          const isFb = /facebook\.com/.test(it.url);
+          openContentForm(chosen, null, { can_create: true, can_approve: me.role === 'owner' || me.role === 'manager', media_enabled: !!c.media_enabled },
+            { message: r.text, link: r.link || '', image_url: mode === 'rewrite' && it.image && !isFb ? it.image : '' });
+          toast('AI đã viết xong. Quý khách đọc lại trước khi lưu hoặc đăng.');
+        } catch (err) { box2.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
+      };
+    });
+  };
+  box.querySelectorAll('[data-share]').forEach((b) => (b.onclick = () => run(items[Number(b.dataset.share)], 'share')));
+  box.querySelectorAll('[data-rew]').forEach((b) => (b.onclick = () => run(items[Number(b.dataset.rew)], 'rewrite')));
 }
 
 async function viewReport() {
@@ -1248,7 +1366,7 @@ const ACTIONS = {
   user_created: 'Tạo tài khoản', user_updated: 'Sửa tài khoản', user_unlocked: 'Mở khóa tài khoản',
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
-  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', post_deleted: 'Xóa bài nháp',
+  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', source_added: 'Thêm nguồn nội dung', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
   media_uploaded: 'Tải ảnh/video lên', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',
@@ -1267,7 +1385,7 @@ async function viewAudit() {
 function viewAccount() {
   layout('tai-khoan', 'Tài khoản', esc(`${me.email} · ${me.role_label}`), `
     ${me.role === 'owner' ? '<div class="card only-mobile"><h2>Quản trị</h2><div class="row"><a class="btn ghost" href="#/nhan-vien">Nhân viên</a><a class="btn ghost" href="#/nhat-ky">Nhật ký</a></div></div>' : ''}
-    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a><a class="btn ghost" href="#/bao-cao">Báo cáo</a>${me.role === 'owner' || me.role === 'manager' ? '<a class="btn ghost" href="#/quang-cao">Quảng cáo</a>' : ''}</div></div>
+    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a><a class="btn ghost" href="#/bao-cao">Báo cáo</a>${me.role !== 'agent' ? '<a class="btn ghost" href="#/nguon-noi-dung">Nguồn nội dung</a>' : ''}${me.role === 'owner' || me.role === 'manager' ? '<a class="btn ghost" href="#/quang-cao">Quảng cáo</a>' : ''}</div></div>
     <div class="card"><h2>Đổi mật khẩu</h2>${passwordForm(false)}</div>
     <div class="card"><h2>Cài lên điện thoại</h2><p class="muted small" style="margin-top:0">
       <b>Android:</b> mở trang này bằng Chrome, bấm menu ⋮ rồi "Cài đặt ứng dụng".<br>
@@ -1297,6 +1415,7 @@ async function render() {
       case 'fanpage': return await viewPages(q);
       case 'bai-dang': return await viewPosts(q);
       case 'bao-cao': return await viewReport();
+      case 'nguon-noi-dung': return await viewSources();
       case 'quang-cao': return me.role === 'owner' || me.role === 'manager' ? await viewAds(q) : go('tong-quan');
       case 'lich-dang': return await viewCalendar(q);
       case 'quy-dinh': return await viewRules();
