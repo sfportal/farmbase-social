@@ -280,3 +280,9 @@ table.rep tr.total td { border-bottom: 0; }
 .srcitem h3 { font-size: 15px; margin: 6px 0 4px; line-height: 1.35; overflow-wrap: anywhere; }
 .srcitem p { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .srcitem .sact { padding: 0 12px 12px; gap: 6px; flex-wrap: wrap; }
+.filters.fsrc { grid-template-columns: 1.4fr 0.8fr 1.6fr auto; }
+.srccount { margin: 14px 0 10px; }
+@media (max-width: 899px) {
+  .filters.fsrc { grid-template-columns: 1fr 1fr; }
+  .filters.fsrc > div:first-child, .filters.fsrc > .kw { grid-column: 1 / -1; }
+}

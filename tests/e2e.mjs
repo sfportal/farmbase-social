@@ -722,6 +722,12 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.screenshot({ path: `test-output/${label}-chi-tiet-chien-dich.png`, fullPage: true });
   await page.goto(`${BASE}/#/nguon-noi-dung`);
   await page.waitForSelector('[data-rew]');
+  assert.equal(await page.inputValue('#ssel'), 'all', 'mặc định xem tất cả nguồn');
+  assert.ok((await page.locator('.srcitem').count()) >= 5, 'gộp bài từ website và Fanpage');
+  await page.fill('#skw', 'xyz khong co, bon phan');
+  await page.waitForFunction(() => document.querySelectorAll('.srcitem').length === 1);
+  assert.match(await page.textContent('.srccount'), /Có 1 bài khớp/);
+  await page.screenshot({ path: `test-output/${label}-nguon-tu-khoa.png`, fullPage: true });
   await page.click('[data-rew]');
   await page.waitForSelector('#wgo');
   await page.check('input[name=wpg]');
