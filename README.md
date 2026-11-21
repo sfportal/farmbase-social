@@ -57,6 +57,7 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | GET, PUT | `/api/pages/:id/autoreply` `{ enabled, message, public_enabled, public_text }`: tự trả lời khi khách bình luận lần đầu trên mỗi bài, `{ten}` chèn tên khách | Xem: mọi vai trò; sửa: Chủ hệ thống, Quản lý |
 | GET | `/api/ads/accounts`: tài khoản quảng cáo của người kết nối Facebook (dùng mã người dùng dài hạn lưu khi kết nối) | Chủ hệ thống, Quản lý |
 | GET | `/api/ads/accounts/:id/campaigns?preset=today\|yesterday\|last_7d\|last_30d\|this_month\|last_month`: chiến dịch, ngân sách, chi tiêu, kết quả và tổng | Chủ hệ thống, Quản lý |
+| GET | `/api/ads/campaigns/:id?preset=`: chi tiết chiến dịch: tổng, mọi loại kết quả, chi tiêu theo ngày, nhóm quảng cáo, mẫu quảng cáo, độ tuổi và giới tính, nền tảng (`preset` thêm `maximum` = toàn thời gian) | Chủ hệ thống, Quản lý |
 | GET | `/api/fb/status`, `/api/fb/connect`, `/api/fb/callback` | Chủ hệ thống |
 
 ## Chạy thử trên máy

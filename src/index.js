@@ -54,6 +54,7 @@ const ROUTES = [
   ['PUT', '/api/pages/:id/autoreply', inbox.saveAutoReply],
   ['GET', '/api/ads/accounts', ads.listAdAccounts],
   ['GET', '/api/ads/accounts/:id/campaigns', ads.accountCampaigns],
+  ['GET', '/api/ads/campaigns/:id', ads.campaignDetail],
   ['GET', '/api/fb/connect', fb.fbConnect, { nav: true }],
   ['GET', '/api/fb/callback', fb.fbCallback, { nav: true }],
 ];

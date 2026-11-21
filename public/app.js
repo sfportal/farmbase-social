@@ -828,7 +828,7 @@ async function viewPosts(q) {
 }
 
 // ---------- Quảng cáo (chỉ xem) ----------
-const ADS_PRESETS = [['today', 'Hôm nay'], ['yesterday', 'Hôm qua'], ['last_7d', '7 ngày qua'], ['last_30d', '30 ngày qua'], ['this_month', 'Tháng này'], ['last_month', 'Tháng trước']];
+const ADS_PRESETS = [['today', 'Hôm nay'], ['yesterday', 'Hôm qua'], ['last_7d', '7 ngày qua'], ['last_30d', '30 ngày qua'], ['this_month', 'Tháng này'], ['last_month', 'Tháng trước'], ['maximum', 'Toàn thời gian']];
 const CAMP_STATUS = {
   ACTIVE: ['Đang chạy', ''], PAUSED: ['Tạm dừng', 'off'], CAMPAIGN_PAUSED: ['Tạm dừng', 'off'], ARCHIVED: ['Lưu trữ', 'off'], DELETED: ['Đã xóa', 'off'],
   IN_PROCESS: ['Đang xử lý', 'warn'], WITH_ISSUES: ['Có vấn đề', 'err'], PENDING_REVIEW: ['Chờ duyệt', 'warn'], DISAPPROVED: ['Bị từ chối', 'err'], PENDING_BILLING_INFO: ['Thiếu thanh toán', 'err'],
@@ -841,7 +841,8 @@ const OBJECTIVE = {
 const adsState = { account: '', preset: 'last_7d', accounts: [] };
 const fmtMoney = (v, cur) => (v === null || v === undefined ? '–' : Number(v).toLocaleString('vi-VN', { maximumFractionDigits: cur === 'VND' ? 0 : 2 }) + (cur === 'VND' ? ' ₫' : ` ${cur}`));
 
-async function viewAds() {
+async function viewAds(q) {
+  if (q && q.get('cd')) return viewCampaign(q.get('cd'));
   layout('quang-cao', 'Quảng cáo', 'Chiến dịch, chi tiêu và kết quả của các tài khoản quảng cáo Facebook', '<div class="muted">Đang tải…</div>');
   const v = document.getElementById('view');
   let d;
@@ -888,7 +889,7 @@ async function loadAds() {
     const i = c.insights;
     const budget = c.daily_budget !== null ? `${fmtMoney(c.daily_budget, cur)}/ngày` : c.lifetime_budget !== null ? `${fmtMoney(c.lifetime_budget, cur)} trọn đời` : 'Theo nhóm quảng cáo';
     return `<tr>
-      <td><b><a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.name)}</a></b><div class="muted small">${esc(OBJECTIVE[c.objective] || c.objective || '')}</div></td>
+      <td><b><a href="#/quang-cao?cd=${encodeURIComponent(c.id)}">${esc(c.name)}</a></b><div class="muted small">${esc(OBJECTIVE[c.objective] || c.objective || '')}</div></td>
       <td><span class="badge ${sc}">${esc(sl)}</span></td>
       <td data-l="Ngân sách">${budget}</td>
       <td data-l="Chi tiêu"><b>${c.has_data ? fmtMoney(i.spend, cur) : '–'}</b></td>
@@ -907,8 +908,98 @@ async function loadAds() {
       <div class="card stat"><div class="muted small">Người tiếp cận</div><div class="n">${fmtNum(t.reach)}</div><div class="muted small">${fmtNum(t.impressions)} lượt hiển thị</div></div>
       <div class="card stat"><div class="muted small">Lượt nhấp</div><div class="n">${fmtNum(t.clicks)}</div><div class="muted small">${t.ctr !== null ? `Tỷ lệ nhấp ${t.ctr.toLocaleString('vi-VN', { maximumFractionDigits: 2 })}%` : '&nbsp;'}</div></div>
     </div>
-    <p class="muted small">Số liệu lấy trực tiếp từ Facebook lúc tải trang, có thể chênh nhẹ so với Trình quản lý quảng cáo trong vài giờ gần nhất. Ở đây chỉ xem; muốn bật, tắt hay sửa chiến dịch, bấm tên chiến dịch để mở trên Facebook.</p>
+    <p class="muted small">Số liệu lấy trực tiếp từ Facebook lúc tải trang, có thể chênh nhẹ so với Trình quản lý quảng cáo trong vài giờ gần nhất. Ở đây chỉ xem; bấm tên chiến dịch để xem chi tiết; muốn bật, tắt hay sửa thì mở Trình quản lý quảng cáo.</p>
     <div class="card">${rows ? `<table class="cards ads"><thead><tr><th>Chiến dịch</th><th>Trạng thái</th><th>Ngân sách</th><th>Chi tiêu</th><th>Hiển thị</th><th>Lượt nhấp</th><th>Tin nhắn</th><th>Chi phí/tin nhắn</th></tr></thead><tbody>${rows}</tbody></table>` : '<p class="muted" style="margin:0">Tài khoản này chưa có chiến dịch nào.</p>'}</div>`;
+}
+
+const GENDER = { male: 'Nam', female: 'Nữ', unknown: 'Không rõ' };
+const PLATFORM = { facebook: 'Facebook', instagram: 'Instagram', messenger: 'Messenger', audience_network: 'Audience Network', threads: 'Threads', whatsapp: 'WhatsApp' };
+const fmtDate = (s) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '');
+const fmtPct = (v) => (v === null || v === undefined ? '–' : `${Number(v).toLocaleString('vi-VN', { maximumFractionDigits: 2 })}%`);
+
+// Thanh ngang cho bảng (độ lớn tương đối), kèm số ở bên phải.
+const hbar = (v, max, label) => `<div class="hbar"><span style="width:${max ? Math.max(2, Math.round((v / max) * 100)) : 0}%"></span><b>${label}</b></div>`;
+
+function insightsCells(i, cur, hasData) {
+  if (!hasData) return '<td data-l="Chi tiêu">–</td><td data-l="Tiếp cận">–</td><td data-l="Lượt nhấp">–</td><td data-l="Tin nhắn">–</td><td data-l="Chi phí/tin nhắn">–</td>';
+  return `<td data-l="Chi tiêu"><b>${fmtMoney(i.spend, cur)}</b></td><td data-l="Tiếp cận">${fmtNum(i.reach)}</td><td data-l="Lượt nhấp">${fmtNum(i.clicks)}</td>
+    <td data-l="Tin nhắn">${fmtNum(i.messages)}</td><td data-l="Chi phí/tin nhắn">${i.cost_per_message !== null ? fmtMoney(i.cost_per_message, cur) : '–'}</td>`;
+}
+
+async function viewCampaign(id) {
+  layout('quang-cao', 'Chi tiết chiến dịch', '<a href="#/quang-cao">← Danh sách chiến dịch</a>', '<div class="muted">Đang tải…</div>');
+  const v = document.getElementById('view');
+  v.innerHTML = `<div class="card filters"><div><label for="pre">Thời gian</label><select id="pre">${ADS_PRESETS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div><div></div>
+    <div class="end"><button class="btn ghost" id="reload">Tải lại</button></div></div><div id="cd"></div>`;
+  const pre = document.getElementById('pre');
+  pre.value = adsState.preset;
+  const load = async () => {
+    const box = document.getElementById('cd');
+    box.innerHTML = '<div class="muted">Đang tải số liệu từ Facebook…</div>';
+    let d;
+    try { d = await api(`/api/ads/campaigns/${encodeURIComponent(id)}?preset=${adsState.preset}`, { quiet: true }); } catch (e) {
+      box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return;
+    }
+    renderCampaign(box, d);
+  };
+  pre.onchange = () => { adsState.preset = pre.value; load(); };
+  document.getElementById('reload').onclick = load;
+  await load();
+}
+
+function renderCampaign(box, d) {
+  const cur = d.currency;
+  const c = d.campaign;
+  const t = d.totals;
+  const [sl, sc] = CAMP_STATUS[c.status] || [c.status, 'off'];
+  const budget = c.daily_budget !== null ? `${fmtMoney(c.daily_budget, cur)}/ngày` : c.lifetime_budget !== null ? `${fmtMoney(c.lifetime_budget, cur)} trọn đời` : 'Đặt ở nhóm quảng cáo';
+  const presetLabel = (ADS_PRESETS.find(([k]) => k === d.preset) || [, ''])[1].toLowerCase();
+  const head = `<div class="card"><div class="row between ads-head" style="margin:0"><div class="grow"><h2 style="margin:0 0 4px">${esc(c.name)}</h2>
+      <div class="muted small"><span class="badge ${sc}">${esc(sl)}</span> ${esc(OBJECTIVE[c.objective] || c.objective || '')} · Tài khoản ${esc(d.account.name)}</div>
+      <div class="muted small">Ngân sách ${budget}${c.start_time ? ` · Bắt đầu ${fmtDate(c.start_time)}` : ''}${c.stop_time ? ` · Kết thúc ${fmtDate(c.stop_time)}` : ''}</div></div>
+      <a class="btn ghost sm" href="${esc(c.link)}" target="_blank" rel="noopener">Mở trong Trình quản lý quảng cáo</a></div></div>`;
+  if (!d.has_data) {
+    box.innerHTML = `${head}<div class="card"><p class="muted" style="margin:0">Chiến dịch không có số liệu trong khoảng ${esc(presetLabel)}. Quý khách thử chọn "Toàn thời gian".</p></div>`;
+    return;
+  }
+  const main = t.messages ? ['Tin nhắn mới', fmtNum(t.messages), `${fmtMoney(t.cost_per_message, cur)} mỗi tin nhắn`]
+    : t.link_clicks ? ['Lượt nhấp liên kết', fmtNum(t.link_clicks), `${fmtMoney(t.cost_per_link_click, cur)} mỗi lượt`]
+    : t.actions[0] ? [t.actions[0].label, fmtNum(t.actions[0].value), t.actions[0].cost !== null ? `${fmtMoney(t.actions[0].cost, cur)} mỗi kết quả` : '&nbsp;'] : ['Kết quả', '0', '&nbsp;'];
+  const stats = `<div class="grid stats4">
+      <div class="card stat"><div class="muted small">Chi tiêu</div><div class="n">${fmtMoney(t.spend, cur)}</div><div class="muted small">CPM ${fmtMoney(t.cpm, cur)}</div></div>
+      <div class="card stat"><div class="muted small">${esc(main[0])}</div><div class="n">${main[1]}</div><div class="muted small">${main[2]}</div></div>
+      <div class="card stat"><div class="muted small">Người tiếp cận</div><div class="n">${fmtNum(t.reach)}</div><div class="muted small">${fmtNum(t.impressions)} lượt hiển thị${t.frequency ? `, tần suất ${t.frequency.toLocaleString('vi-VN', { maximumFractionDigits: 2 })}` : ''}</div></div>
+      <div class="card stat"><div class="muted small">Lượt nhấp</div><div class="n">${fmtNum(t.clicks)}</div><div class="muted small">Tỷ lệ nhấp ${fmtPct(t.ctr)}${t.cpc ? `, ${fmtMoney(t.cpc, cur)}/lượt` : ''}</div></div></div>`;
+  const acts = t.actions.length ? `<div class="card"><h2>Tất cả kết quả</h2><table class="cards ads2"><thead><tr><th>Kết quả</th><th>Số lượng</th><th>Chi phí mỗi kết quả</th></tr></thead><tbody>
+      ${t.actions.map((a) => `<tr><td>${esc(a.label)}</td><td data-l="Số lượng"><b>${fmtNum(a.value)}</b></td><td data-l="Chi phí mỗi kết quả">${a.cost !== null ? fmtMoney(a.cost, cur) : '–'}</td></tr>`).join('')}</tbody></table></div>` : '';
+  // Biểu đồ chi tiêu theo ngày: một chuỗi, cột mảnh, rê chuột hoặc chạm để xem số.
+  const maxS = Math.max(...d.daily.map((x) => x.spend), 0);
+  const days = d.daily.length > 1 ? `<div class="card"><h2>Chi tiêu theo ngày</h2>
+      <div class="bars" role="img" aria-label="Chi tiêu theo ngày, cao nhất ${fmtMoney(maxS, cur)}">${d.daily.map((x) => `<div class="bar" tabindex="0" data-tip="${esc(fmtDate(x.date))}: ${esc(fmtMoney(x.spend, cur))} · ${fmtNum(x.messages)} tin nhắn · ${fmtNum(x.clicks)} lượt nhấp"><span style="height:${maxS ? Math.max(2, Math.round((x.spend / maxS) * 100)) : 0}%"></span></div>`).join('')}</div>
+      <div class="row between muted small" style="flex-wrap:nowrap"><span>${fmtDate(d.daily[0].date)}</span><span>Cao nhất ${fmtMoney(maxS, cur)}/ngày</span><span>${fmtDate(d.daily[d.daily.length - 1].date)}</span></div>
+      <details><summary class="small">Xem bảng số liệu theo ngày</summary><table class="cards ads2"><thead><tr><th>Ngày</th><th>Chi tiêu</th><th>Lượt nhấp</th><th>Tin nhắn</th></tr></thead><tbody>
+      ${[...d.daily].reverse().map((x) => `<tr><td>${fmtDate(x.date)}</td><td data-l="Chi tiêu">${fmtMoney(x.spend, cur)}</td><td data-l="Lượt nhấp">${fmtNum(x.clicks)}</td><td data-l="Tin nhắn">${fmtNum(x.messages)}</td></tr>`).join('')}</tbody></table></details></div>` : '';
+  const head5 = '<th>Chi tiêu</th><th>Tiếp cận</th><th>Lượt nhấp</th><th>Tin nhắn</th><th>Chi phí/tin nhắn</th>';
+  const adsets = d.adsets.length ? `<div class="card"><h2>Nhóm quảng cáo (${d.adsets.length})</h2><table class="cards ads"><thead><tr><th>Nhóm quảng cáo</th><th>Trạng thái</th>${head5}</tr></thead><tbody>
+      ${d.adsets.map((a) => { const [l, k] = CAMP_STATUS[a.status] || [a.status, 'off']; return `<tr><td><b>${esc(a.name)}</b>${a.targeting ? `<div class="muted small">${esc(a.targeting)}</div>` : ''}</td><td><span class="badge ${k}">${esc(l)}</span></td>${insightsCells(a.insights, cur, a.has_data)}</tr>`; }).join('')}</tbody></table></div>` : '';
+  const ads = d.ads.length ? `<div class="card"><h2>Mẫu quảng cáo (${d.ads.length})</h2>${d.ads.map((a) => { const [l, k] = CAMP_STATUS[a.status] || [a.status, 'off']; const i = a.insights; return `<article class="post">
+      ${a.thumbnail ? `<img class="thumb" src="${esc(a.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="thumb empty"></div>'}
+      <div class="grow"><div class="row between" style="flex-wrap:nowrap"><b class="ellipsis">${esc(a.name)}</b><span class="badge ${k}">${esc(l)}</span></div>
+        <div class="muted small ellipsis">${esc(a.adset || '')}</div>
+        ${a.text ? `<div class="msg">${esc(a.text)}</div>` : ''}
+        <div class="metrics">${a.has_data ? `<span>Chi tiêu <b>${fmtMoney(i.spend, cur)}</b></span><span>Tiếp cận <b>${fmtNum(i.reach)}</b></span><span>Nhấp <b>${fmtNum(i.clicks)}</b></span><span>Tin nhắn <b>${fmtNum(i.messages)}</b></span>${i.cost_per_message !== null ? `<span><b>${fmtMoney(i.cost_per_message, cur)}</b>/tin nhắn</span>` : ''}` : '<span>Không có số liệu trong khoảng này</span>'}
+        ${a.post_link ? `<a href="${esc(a.post_link)}" target="_blank" rel="noopener">Xem bài quảng cáo</a>` : ''}</div></div></article>`; }).join('')}</div>` : '';
+  // Độ tuổi và giới tính: gộp theo nhóm tuổi, tách nam/nữ.
+  const ages = [...new Set(d.demographics.map((x) => x.age))].sort();
+  const cell = (age, g) => d.demographics.filter((x) => x.age === age && x.gender === g).reduce((s, x) => ({ spend: s.spend + x.spend, reach: s.reach + x.reach, messages: s.messages + x.messages }), { spend: 0, reach: 0, messages: 0 });
+  const maxD = Math.max(0, ...ages.map((a) => cell(a, 'male').spend + cell(a, 'female').spend + cell(a, 'unknown').spend));
+  const demo = ages.length ? `<div class="card"><h2>Độ tuổi và giới tính</h2><table class="cards ads2"><thead><tr><th>Độ tuổi</th><th>Chi tiêu</th><th>Nam (tiếp cận · tin nhắn)</th><th>Nữ (tiếp cận · tin nhắn)</th></tr></thead><tbody>
+      ${ages.map((a) => { const m = cell(a, 'male'); const f = cell(a, 'female'); const all = m.spend + f.spend + cell(a, 'unknown').spend; return `<tr><td><b>${esc(a)}</b></td><td data-l="Chi tiêu">${hbar(all, maxD, fmtMoney(all, cur))}</td><td data-l="Nam">${fmtNum(m.reach)} · ${fmtNum(m.messages)}</td><td data-l="Nữ">${fmtNum(f.reach)} · ${fmtNum(f.messages)}</td></tr>`; }).join('')}</tbody></table></div>` : '';
+  const maxP = Math.max(0, ...d.platforms.map((x) => x.spend));
+  const plat = d.platforms.length ? `<div class="card"><h2>Nền tảng hiển thị</h2><table class="cards ads2"><thead><tr><th>Nền tảng</th><th>Chi tiêu</th><th>Tiếp cận</th><th>Tin nhắn</th></tr></thead><tbody>
+      ${d.platforms.map((p) => `<tr><td><b>${esc(PLATFORM[p.platform] || p.platform)}</b></td><td data-l="Chi tiêu">${hbar(p.spend, maxP, fmtMoney(p.spend, cur))}</td><td data-l="Tiếp cận">${fmtNum(p.reach)}</td><td data-l="Tin nhắn">${fmtNum(p.messages)}</td></tr>`).join('')}</tbody></table></div>` : '';
+  box.innerHTML = `${head}${stats}<p class="muted small">Số liệu ${esc(presetLabel)}, lấy trực tiếp từ Facebook lúc tải trang.</p>${acts}${days}${adsets}${ads}${demo}${plat}`;
+  box.querySelectorAll('.bar').forEach((b) => { b.onclick = () => toast(b.dataset.tip); });
 }
 
 // ---------- Nhân viên ----------
@@ -1041,7 +1132,7 @@ async function render() {
       case 'hop-thu': return await viewInbox(q);
       case 'fanpage': return await viewPages(q);
       case 'bai-dang': return await viewPosts(q);
-      case 'quang-cao': return me.role === 'owner' || me.role === 'manager' ? await viewAds() : go('tong-quan');
+      case 'quang-cao': return me.role === 'owner' || me.role === 'manager' ? await viewAds(q) : go('tong-quan');
       case 'lich-dang': return await viewCalendar(q);
       case 'quy-dinh': return await viewRules();
       case 'nhan-vien': return me.role === 'owner' ? await viewUsers() : go('tong-quan');
