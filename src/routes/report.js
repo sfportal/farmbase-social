@@ -150,6 +150,8 @@ export async function pageReport(request, env, user) {
     Object.keys(INSIGHT_METRICS).forEach((m, i) => {
       const r = ins[i];
       if (r.status !== 'fulfilled') { errors.push({ source: m, message: r.reason?.message || 'Lỗi' }); return; }
+      // Không có giá trị nào (chưa cấp quyền read_insights hoặc Trang chưa đủ điều kiện có thống kê): coi như chưa có, không hiện số 0.
+      if (!r.value.length) { errors.push({ source: m, message: 'Facebook chưa trả số liệu' }); return; }
       let total = 0; let prevTotal = 0;
       for (const v of r.value) {
         if (v.date >= fromKey) { const d = byDate.get(v.date); if (d) { d.insights[m] = v.value; total += v.value; } }

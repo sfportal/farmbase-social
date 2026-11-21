@@ -80,6 +80,7 @@ const fakeGraph = createServer(async (req, res) => {
   const pin = u.pathname.match(/^\/v[\d.]+\/(\d+)\/insights$/);
   if (pin) {
     const metric = u.searchParams.get('metric');
+    if (metric === 'page_views_total') return res.end(JSON.stringify({ data: [{ name: metric, period: 'day', values: [] }] }));
     if (!['page_post_engagements', 'page_daily_follows_unique'].includes(metric)) { res.statusCode = 400; return res.end('{"error":{"message":"(#100) The value must be a valid insights metric","code":100}}'); }
     const since = Number(u.searchParams.get('since')); const until = Number(u.searchParams.get('until'));
     const values = [];
