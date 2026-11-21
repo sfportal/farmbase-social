@@ -286,3 +286,14 @@ table.rep tr.total td { border-bottom: 0; }
   .filters.fsrc { grid-template-columns: 1fr 1fr; }
   .filters.fsrc > div:first-child, .filters.fsrc > .kw { grid-column: 1 / -1; }
 }
+/* Bài theo từng Trang, thiết lập footer */
+#pv:empty { display: none; }
+#pv { margin-top: 12px; display: grid; gap: 10px; }
+.pvhead { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.pvar { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: var(--bg); }
+.pvar textarea { margin-top: 6px; font-size: 14px; }
+.pvar .sact { margin-top: 6px; gap: 6px; flex-wrap: wrap; align-items: center; }
+.pstyle { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.pstyle summary { cursor: pointer; }
+.pfoot { white-space: pre-wrap; background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13.5px; margin: 4px 0 0; overflow-wrap: anywhere; }
+.pvar .tag { font-size: 12px; }

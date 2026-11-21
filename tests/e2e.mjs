@@ -684,6 +684,25 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(r.status, 403, 'xóa cần cùng nguồn');
   r = await owner.req('/api/audit');
   assert.ok(r.data.entries.some((a) => a.action === 'source_added'), 'ghi nhật ký thêm nguồn');
+  // Footer riêng từng Trang và nội dung riêng khi đăng nhiều Trang
+  r = await viewer.req('/api/styles/222', { method: 'PUT', body: { hotline: 'x' } });
+  assert.equal(r.status, 403, 'biên tập không sửa thiết lập Trang');
+  r = await owner.req('/api/styles/111', { method: 'PUT', body: { cta: '👉 Nhắn tin cho Trang A', hotline: 'Hotline A: 0911 000 111', website: 'a.vn', hashtags: '#FarmBase, #TrangA' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.style.website, 'https://a.vn');
+  assert.equal(r.data.style.hashtags, '#FarmBase #TrangA');
+  r = await owner.req('/api/styles/222', { method: 'PUT', body: { hotline: 'Hotline B: 0922 000 222', hashtags: '#FarmBase #TrangB', note: 'Gần gũi với bà con' } });
+  assert.equal(r.status, 200);
+  r = await viewer.req('/api/styles');
+  assert.deepEqual(r.data.pages.map((p) => p.id), ['222']);
+  assert.equal(r.data.pages[0].style.note, 'Gần gũi với bà con');
+  r = await viewer.req('/api/ai/adapt', { method: 'POST', body: { text: 'Bài chung\n\nNguồn: https://bao.vn/a', page_id: '111' } });
+  assert.equal(r.status, 404, 'không chỉnh cho Trang không được giao');
+  r = await viewer.req('/api/ai/adapt', { method: 'POST', body: { text: 'Bài chung\n\nNguồn: https://bao.vn/a', page_id: '222' } });
+  assert.equal(r.data.body, 'Bài AI viết thử [Fanpage Thử B]\n\nNguồn: https://bao.vn/a', 'giữ dòng nguồn');
+  r = await owner.req('/api/content', { method: 'POST', body: { message: '', messages: { 111: 'Bản cho A', 222: 'Bản cho B' }, page_ids: ['111', '222'], action: 'draft' } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.deepEqual(r.data.items.map((i) => [i.page_id, i.message]).sort(), [['111', 'Bản cho A'], ['222', 'Bản cho B']]);
   step('nguồn nội dung: thêm website và Fanpage, đọc bài, video, chia sẻ và AI viết lại có ghi nguồn, đúng phân quyền');
 }
 
@@ -730,7 +749,12 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.click('#new');
   await page.waitForSelector('#cf');
   await page.click('#aibox summary');
-  await page.screenshot({ path: `test-output/${label}-soan-bai.png` });
+  await page.check('input[name=pg][value="111"]');
+  await page.check('input[name=pg][value="222"]');
+  await page.fill('#msg', 'Mời bà con dự tập huấn');
+  await page.waitForFunction(() => document.querySelectorAll('.pvar').length === 2 && document.querySelector('[data-var="111"]').value.includes('Hotline A') && document.querySelector('[data-var="222"]').value.startsWith('Mời'));
+  assert.equal(await page.inputValue('[data-var="222"]'), 'Mời bà con dự tập huấn\n\nHotline B: 0922 000 222\n\n#FarmBase #TrangB');
+  await page.screenshot({ path: `test-output/${label}-soan-bai.png`, fullPage: true });
   await page.keyboard.press('Escape');
   await page.click('[data-c-approve]');
   await page.waitForSelector('#apf');
