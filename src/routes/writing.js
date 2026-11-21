@@ -30,6 +30,26 @@ export function ruleLimits(rules) {
   return { minEmoji: e2 ? Number(e2[1]) : 0, maxEmoji: e ? Number(e[1]) : null, minTags: h ? Number(h[1]) : 2, maxTags: h ? Number(h[2]) : 4 };
 }
 
+// Đoạn văn ngắn: mỗi đoạn tối đa 2 câu và khoảng 200 ký tự (≈ 3 dòng trên điện thoại), cách nhau một dòng trống.
+// Dòng gạch đầu dòng liền nhau giữ nguyên trong một khối.
+export const PARA_MAX = 200;
+const BULLET = /^\s*(?:[-•*+]|\d+[.)]|\p{Extended_Pictographic})/u;
+export function shortParagraphs(text) {
+  const blocks = [];
+  for (const line of String(text || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
+    if (BULLET.test(line) && line.length <= PARA_MAX && blocks.length && blocks[blocks.length - 1].bullet) { blocks[blocks.length - 1].lines.push(line); continue; }
+    const sentences = line.split(/(?<=[.!?…])\s+/);
+    if (line.length <= PARA_MAX && sentences.length <= 2) { blocks.push({ lines: [line], bullet: BULLET.test(line) }); continue; }
+    let cur = [];
+    for (const sen of sentences) {
+      const next = [...cur, sen].join(' ');
+      if (cur.length && (cur.length >= 2 || next.length > PARA_MAX)) { blocks.push({ lines: [cur.join(' ')], bullet: false }); cur = [sen]; } else cur.push(sen);
+    }
+    if (cur.length) blocks.push({ lines: [cur.join(' ')], bullet: false });
+  }
+  return blocks.map((b) => b.lines.join('\n')).join('\n\n');
+}
+
 // Bỏ số điện thoại, câu liên hệ, hashtag AI tự viết; giới hạn biểu tượng; rồi gắn nguồn, liên hệ và hashtag đúng quy định.
 export function enforceStyle(text, { rules = '', contact = '', hashtags = '', source = '', strip = false } = {}) {
   // strip: chỉ lấy phần thân bài (bỏ liên hệ, hashtag AI tự viết); footer riêng từng Trang gắn ở khung soạn.
@@ -54,7 +74,7 @@ export function enforceStyle(text, { rules = '', contact = '', hashtags = '', so
   body = body.replace(/(\p{Extended_Pictographic}\uFE0F?)(?:\s*\p{Extended_Pictographic}\uFE0F?)+/gu, '$1');
   if (lim.maxEmoji !== null) { let n = 0; body = body.replace(EMOJI, (m) => (++n > lim.maxEmoji ? '' : m)); }
   if (lim.minEmoji > 0 && !/\p{Extended_Pictographic}/u.test(body) && body.trim()) body = `🌱 ${body.trimStart()}`;
-  body = body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  body = shortParagraphs(body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim());
   const allowed = parseTags(hashtags);
   let tags = [];
   if (strip) tags = [];
@@ -155,6 +175,7 @@ export function systemPrompt(rules, pageNames, style = {}) {
   const emo = lim.maxEmoji !== null
     ? `Dùng ${lim.minEmoji ? `${lim.minEmoji} đến ` : 'tối đa '}${lim.maxEmoji} biểu tượng cảm xúc phù hợp chủ đề (ví dụ 🌱 🌿 🍈 ☕ ✅ 📌 📲 👉) cho bài sinh động: đặt ở đầu câu mở đầu, trước ý chính hoặc lời kêu gọi; không đặt hai biểu tượng liền nhau, không rải mỗi câu một biểu tượng.`
     : 'Có thể dùng vài biểu tượng cảm xúc phù hợp cho sinh động, không lạm dụng.';
+  const para = 'Đoạn văn ngắn: mỗi đoạn tối đa 2 câu (không quá 3 dòng trên điện thoại), các đoạn cách nhau một dòng trống; không viết đoạn dài.';
   let tail;
   if (style.bodyOnly) tail = 'Không tự viết số điện thoại, website, hashtag hay câu "liên hệ qua số..."; hệ thống tự thêm phần cuối bài riêng cho từng Trang. Kết bài bằng một câu kêu gọi ngắn không kèm số.';
   else if (style.contact || style.hashtags) tail = `Không tự viết số điện thoại, website hay câu "liên hệ qua số..." vì hệ thống tự thêm phần liên hệ chuẩn ở cuối bài${style.contact ? ` (${style.contact})` : ''}. Kết bài bằng một câu kêu gọi ngắn không kèm số.${style.hashtags ? ` Dòng cuối ghi 2 đến 4 hashtag chọn trong danh sách: ${style.hashtags}.` : ''}`;
@@ -164,6 +185,7 @@ export function systemPrompt(rules, pageNames, style = {}) {
     'Viết bằng tiếng Việt có dấu, tự nhiên, đúng chính tả. Chỉ trả về đúng nội dung bài đăng, không giải thích, không tiêu đề kiểu Markdown, không dùng ** hay #.',
     'Không bịa số liệu, giá, ngày tháng, tên người hoặc cam kết không có trong ý chính. Thiếu thông tin thì viết chung, không tự thêm.',
     emo,
+    para,
     pageNames.length ? `Bài sẽ đăng trên Fanpage: ${pageNames.join(', ')}.` : '',
     rules ? `QUY ĐỊNH ĐĂNG BÀI CỦA DOANH NGHIỆP (bắt buộc tuân theo, ưu tiên cao nhất):\n${rules}` : '',
     style.note ? `LƯU Ý RIÊNG CỦA FANPAGE (áp dụng cho bài này): ${style.note}` : '',

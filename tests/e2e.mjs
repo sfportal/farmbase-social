@@ -746,6 +746,14 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.goto(`${BASE}/#/lich-dang`);
   await page.waitForSelector('#new');
   await page.waitForSelector('.chip');
+  await page.click('[data-view="month"]');
+  await page.waitForSelector('.mgrid .mi2');
+  const ovm = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(ovm <= 1, `${label} lịch tháng: tràn ngang ${ovm}px`);
+  assert.ok((await page.locator('.mgrid .mt img').count()) >= 1, 'lịch tháng có ảnh bài đăng');
+  await page.screenshot({ path: `test-output/${label}-lich-thang.png`, fullPage: true });
+  await page.click('.mgrid .mi2');
+  await page.waitForSelector('.post.flash');
   await page.click('#new');
   await page.waitForSelector('#cf');
   await page.click('#aibox summary');

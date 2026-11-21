@@ -430,7 +430,7 @@ const CSTATUS = {
   draft: ['Nháp', 'off'], pending: ['Chờ duyệt', 'warn'], rejected: ['Bị từ chối', 'err'],
   scheduled: ['Đã hẹn giờ', ''], published: ['Đã đăng', 'ok'], failed: ['Đăng lỗi', 'err'],
 };
-const calState = { status: '', page: '' };
+const calState = { status: '', page: '', view: 'list', month: '' };
 const toLocalInput = (t) => { if (!t) return ''; const d = new Date(t * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 const dayKey = (t) => new Date(t * 1000).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
 
@@ -628,6 +628,46 @@ function cardThumb(c) {
   return c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="thumb empty"></div>';
 }
 
+// Lịch tháng: mỗi ô ngày có ảnh nhỏ, giờ đăng, màu theo trạng thái; bấm để xem bài trong danh sách.
+const pad2 = (n) => String(n).padStart(2, '0');
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+function itemThumb(c) {
+  const m = c.media?.[0];
+  if (m && m.kind !== 'video') return `<img src="${esc(m.url)}" alt="" loading="lazy">`;
+  if (m) return '<span class="vid">▶</span>';
+  if (c.image_url) return `<img src="${esc(c.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
+  return '';
+}
+function monthGrid(items) {
+  const now = new Date();
+  if (!calState.month) calState.month = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}`;
+  const [y, mo] = calState.month.split('-').map(Number);
+  const first = new Date(y, mo - 1, 1);
+  const start = new Date(first); start.setDate(1 - ((first.getDay() + 6) % 7)); // bắt đầu từ thứ Hai
+  const byDay = {};
+  for (const c of items) {
+    const t = c.status === 'published' ? c.published_at : (c.scheduled_at || c.created_at);
+    if (!t) continue;
+    (byDay[ymd(new Date(t * 1000))] ||= []).push({ c, t });
+  }
+  Object.values(byDay).forEach((l) => l.sort((a, b) => a.t - b.t));
+  const prev = new Date(y, mo - 2, 1); const next = new Date(y, mo, 1);
+  const today = ymd(now);
+  let cells = '';
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    if (i === 35 && d.getMonth() !== mo - 1) break;
+    const list = byDay[ymd(d)] || [];
+    cells += `<div class="mc ${d.getMonth() !== mo - 1 ? 'out' : ''} ${ymd(d) === today ? 'today' : ''}"><div class="mn">${d.getDate()}</div>
+      ${list.slice(0, 3).map(({ c, t }) => `<button class="mi2 st-${esc(c.status)}" data-goto="${c.id}" title="${esc(`${c.page_name}: ${(c.message || '').slice(0, 120)}`)}">${itemThumb(c) ? `<span class="mt">${itemThumb(c)}</span>` : ''}<span class="mx2"><b>${new Date(t * 1000).toTimeString().slice(0, 5)}</b> <span class="mp">${esc((c.message || c.page_name || '').slice(0, 40))}</span></span></button>`).join('')}
+      ${list.length > 3 ? `<button class="more2" data-goto="${list[3].c.id}">+${list.length - 3} bài</button>` : ''}</div>`;
+  }
+  return `<div class="card month">
+    <div class="row between mhead"><button class="btn ghost sm" data-mon="${prev.getFullYear()}-${pad2(prev.getMonth() + 1)}" aria-label="Tháng trước">‹</button><b>Tháng ${mo}/${y}</b><button class="btn ghost sm" data-mon="${next.getFullYear()}-${pad2(next.getMonth() + 1)}" aria-label="Tháng sau">›</button></div>
+    <div class="mgrid">${['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map((w) => `<div class="mw">${w}</div>`).join('')}${cells}</div>
+    <div class="mlegend small muted"><span class="lg st-scheduled"></span>Hẹn giờ <span class="lg st-published"></span>Đã đăng <span class="lg st-pending"></span>Chờ duyệt <span class="lg st-draft"></span>Nháp <span class="lg st-failed"></span>Lỗi</div></div>`;
+}
+
 function contentCard(c, perms) {
   const [label, cls] = CSTATUS[c.status] || [c.status, 'off'];
   const mine = c.created_by === me.id;
@@ -643,7 +683,7 @@ function contentCard(c, perms) {
   if (perms.can_approve && c.status === 'scheduled') acts.push(`<button class="btn danger sm" data-c-cancel="${c.id}">Hủy lịch</button>`);
   if (editable) acts.push(`<button class="btn ghost sm" data-c-del="${c.id}">Xóa</button>`);
   if (c.fb_post_id && c.status === 'published') acts.push(`<a class="btn ghost sm" href="https://www.facebook.com/${esc(c.fb_post_id)}" target="_blank" rel="noopener">Xem trên Facebook</a>`);
-  return `<article class="post">
+  return `<article class="post" id="c-${c.id}">
     ${cardThumb(c)}
     <div class="grow">
       <div class="muted small ellipsis"><b>${esc(c.page_name)}</b> · ${when} <span class="badge ${cls}">${label}</span></div>
@@ -717,10 +757,24 @@ async function loadCalendar() {
     const t = c.status === 'published' ? c.published_at : (c.scheduled_at || c.created_at);
     (groups[dayKey(t)] ||= []).push(c);
   }
-  box.innerHTML = `<div class="chips">${chips}</div>
+  const seg = `<div class="seg" role="group" aria-label="Kiểu xem"><button class="${calState.view === 'list' ? 'on' : ''}" data-view="list">Danh sách</button><button class="${calState.view === 'month' ? 'on' : ''}" data-view="month">Lịch tháng</button></div>`;
+  if (calState.view === 'month') {
+    box.innerHTML = `<div class="calbar"><div class="chips">${chips}</div>${seg}</div>${monthGrid(d.items)}`;
+    box.querySelectorAll('[data-st]').forEach((b) => (b.onclick = () => { calState.status = b.dataset.st; loadCalendar(); }));
+    box.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => { calState.view = b.dataset.view; loadCalendar(); }));
+    box.querySelectorAll('[data-mon]').forEach((b) => (b.onclick = () => { calState.month = b.dataset.mon; loadCalendar(); }));
+    box.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = async () => {
+      calState.view = 'list'; await loadCalendar();
+      const el = document.getElementById(`c-${b.dataset.goto}`);
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 2000); }
+    }));
+    return;
+  }
+  box.innerHTML = `<div class="calbar"><div class="chips">${chips}</div>${seg}</div>
     ${d.items.length ? Object.entries(groups).map(([day, list]) => `<h3 class="day">${esc(day)}</h3><div class="card">${list.map((c) => contentCard(c, perms)).join('')}</div>`).join('')
       : `<div class="card"><p class="muted" style="margin:0">${perms.can_create ? 'Chưa có bài nào. Bấm "Soạn bài" để bắt đầu.' : 'Chưa có bài nào.'}</p></div>`}`;
   box.querySelectorAll('[data-st]').forEach((b) => (b.onclick = () => { calState.status = b.dataset.st; loadCalendar(); }));
+  box.querySelectorAll('[data-view]').forEach((b) => (b.onclick = () => { calState.view = b.dataset.view; loadCalendar(); }));
   const byId = Object.fromEntries(d.items.map((c) => [c.id, c]));
   const act = async (btn, fn, ok) => { btn.disabled = true; try { await fn(); toast(ok); loadCalendar(); } catch (e) { toast(e.message); btn.disabled = false; } };
   box.querySelectorAll('[data-c-edit]').forEach((b) => (b.onclick = () => openContentForm(calPages, byId[b.dataset.cEdit], perms)));
