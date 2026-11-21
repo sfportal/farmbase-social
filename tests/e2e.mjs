@@ -718,6 +718,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   page.on('pageerror', (e) => errors.push(`${label}: ${e.message}`));
   // Ảnh thử trỏ ra ngoài (example.com) không tải được trong môi trường kiểm thử: bỏ qua lỗi tải ảnh đó.
   page.on('console', (m) => { if (m.type() === 'error' && !/ERR_TUNNEL_CONNECTION_FAILED|ERR_NAME_NOT_RESOLVED/.test(m.text())) errors.push(`${label}: ${m.text()}`); });
+  await page.goto(`${BASE}/prompt/`);
+  await page.waitForSelector('#email');
+  assert.ok(page.url().endsWith('/#/dang-nhap'), 'thư viện prompt: chưa đăng nhập thì về trang đăng nhập');
   await page.goto(BASE + '/');
   await page.waitForSelector('#email');
   await page.screenshot({ path: `test-output/${label}-dang-nhap.png`, fullPage: true });
@@ -732,6 +735,12 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
   }
+  // Thư viện prompt: trang độc lập, mở từ menu, email liên hệ điền từ máy chủ
+  await page.goto(`${BASE}/prompt/`);
+  await page.waitForSelector('.card');
+  const lib = await page.evaluate(() => ({ cards: document.querySelectorAll('.card').length, token: document.body.innerText.includes('@@EMAIL@@') || JSON.stringify(window.PROMPTS).includes('@@EMAIL@@'), ct: JSON.stringify(window.PROMPTS).includes(window.__CT), overflow: document.documentElement.scrollWidth - window.innerWidth }));
+  assert.ok(lib.cards > 20 && !lib.token && lib.ct && lib.overflow <= 1, `${label} thư viện prompt: ${JSON.stringify(lib)}`);
+  await page.screenshot({ path: `test-output/${label}-thu-vien-prompt.png` });
   for (const f of ['chinh-sach-quyen-rieng-tu', 'xoa-du-lieu']) {
     await page.goto(`${BASE}/${f}.html`);
     const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -811,6 +820,6 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
 await browser.close();
 fakeGraph.close();
 assert.deepEqual(errors, [], errors.join('\n'));
-step('giao diện máy tính 1366px và điện thoại 390px: không tràn ngang, không lỗi JS');
+step('giao diện máy tính 1366px và điện thoại 390px: không tràn ngang, không lỗi JS; thư viện prompt cần đăng nhập');
 
 console.log('e2e: đạt');
