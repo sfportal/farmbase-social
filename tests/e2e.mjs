@@ -42,7 +42,7 @@ const fakeGraph = createServer(async (req, res) => {
     return res.end(JSON.stringify(w[2] === 'photos' ? { id: `photo${fbSeq}`, post_id: `${pageId}_p${fbSeq}` } : { id: `${pageId}_f${fbSeq}` }));
   }
   // Quảng cáo: tài khoản act_555 (VND), 2 chiến dịch, chỉ chiến dịch 1 có số liệu.
-  const ad = u.pathname.match(/^\/v[\d.]+\/(me\/adaccounts|act_\d+(?:\/campaigns|\/insights)?)$/);
+  const ad = u.pathname.match(/^\/v[\d.]+\/(me\/adaccounts|act_\d+(?:\/campaigns|\/insights)?|700[12](?:\/insights|\/adsets|\/ads)?)$/);
   if (ad) {
     if (u.searchParams.get('access_token') !== 'ma-nguoi-dung') { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
     const p = ad[1];
@@ -50,10 +50,24 @@ const fakeGraph = createServer(async (req, res) => {
     if (p === 'me/adaccounts') return res.end(JSON.stringify({ data: [{ id: 'act_555', account_id: '555', name: 'QC FarmBase', currency: 'VND', account_status: 1, amount_spent: '1500000' }] }));
     if (p === 'act_555') return res.end(JSON.stringify({ id: 'act_555', account_id: '555', name: 'QC FarmBase', currency: 'VND', account_status: 1 }));
     if (p === 'act_555/campaigns') return res.end(JSON.stringify({ data: [
-      { id: 'c2', name: 'Chiến dịch tạm dừng', status: 'PAUSED', effective_status: 'PAUSED', objective: 'OUTCOME_TRAFFIC', lifetime_budget: '2000000' },
-      { id: 'c1', name: 'Tin nhắn sầu riêng', status: 'ACTIVE', effective_status: 'ACTIVE', objective: 'OUTCOME_ENGAGEMENT', daily_budget: '200000' }] }));
+      { id: '7002', name: 'Chiến dịch tạm dừng', status: 'PAUSED', effective_status: 'PAUSED', objective: 'OUTCOME_TRAFFIC', lifetime_budget: '2000000' },
+      { id: '7001', name: 'Tin nhắn sầu riêng', status: 'ACTIVE', effective_status: 'ACTIVE', objective: 'OUTCOME_ENGAGEMENT', daily_budget: '200000' }] }));
     const row = { spend: '700000', impressions: '35000', reach: '20000', clicks: '900', ctr: '2.57', cpm: '20000', actions: [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '35' }, { action_type: 'link_click', value: '400' }] };
-    if (p === 'act_555/insights') return res.end(JSON.stringify({ data: u.searchParams.get('level') === 'campaign' ? [{ campaign_id: 'c1', ...row }] : [row] }));
+    if (p === '7001' || p === '7002') return res.end(JSON.stringify({ id: p, name: p === '7001' ? 'Tin nhắn sầu riêng' : 'Chiến dịch tạm dừng', effective_status: p === '7001' ? 'ACTIVE' : 'PAUSED', objective: 'OUTCOME_ENGAGEMENT', daily_budget: '200000', account_id: '555', start_time: '2026-11-01T08:00:00+0700' }));
+    if (p.startsWith('7002/')) return res.end('{"data":[]}');
+    if (p === '7001/adsets') return res.end(JSON.stringify({ data: [{ id: '8001', name: 'Nông dân Đắk Lắk', effective_status: 'ACTIVE', targeting: { age_min: 25, age_max: 55, genders: [1], geo_locations: { regions: [{ name: 'Đắk Lắk' }] } } }] }));
+    if (p === '7001/ads') return res.end(JSON.stringify({ data: [{ id: '9001', name: 'Ảnh vườn sầu riêng', effective_status: 'ACTIVE', adset_id: '8001', creative: { thumbnail_url: `${BASE}/icons/icon.svg`, body: 'Nhắn tin để được tư vấn mã số vùng trồng', effective_object_story_id: '111_1' } }] }));
+    if (p === '7001/insights') {
+      const q = u.searchParams;
+      const detail = { ...row, frequency: '1.75', cpc: '777.78', cost_per_action_type: [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '20000' }] };
+      if (q.get('time_increment')) return res.end(JSON.stringify({ data: [{ date_start: '2026-11-19', ...row, spend: '300000' }, { date_start: '2026-11-20', ...row, spend: '400000' }] }));
+      if (q.get('level') === 'adset') return res.end(JSON.stringify({ data: [{ adset_id: '8001', ...detail }] }));
+      if (q.get('level') === 'ad') return res.end(JSON.stringify({ data: [{ ad_id: '9001', ...detail }] }));
+      if (q.get('breakdowns') === 'age,gender') return res.end(JSON.stringify({ data: [{ age: '25-34', gender: 'male', spend: '500000', reach: '12000', impressions: '20000', clicks: '600', actions: row.actions }, { age: '35-44', gender: 'female', spend: '200000', reach: '8000', impressions: '15000', clicks: '300' }] }));
+      if (q.get('breakdowns') === 'publisher_platform') return res.end(JSON.stringify({ data: [{ publisher_platform: 'facebook', spend: '600000', reach: '18000', impressions: '30000', clicks: '800' }, { publisher_platform: 'instagram', spend: '100000', reach: '2000', impressions: '5000', clicks: '100' }] }));
+      return res.end(JSON.stringify({ data: [detail] }));
+    }
+    if (p === 'act_555/insights') return res.end(JSON.stringify({ data: u.searchParams.get('level') === 'campaign' ? [{ campaign_id: '7001', ...row }] : [row] }));
     res.statusCode = 400; return res.end('{"error":{"message":"(#200) Không có quyền","code":200}}');
   }
   const who = u.pathname.match(/^\/v[\d.]+\/(\d+)$/);
@@ -485,11 +499,27 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req('/api/ads/accounts/555/campaigns?preset=last_30d');
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.totals.spend, 700000); assert.equal(r.data.totals.messages, 35); assert.equal(r.data.totals.cost_per_message, 20000);
-  assert.deepEqual(r.data.campaigns.map((c) => c.id), ['c1', 'c2'], 'chiến dịch đang chạy lên trước');
+  assert.deepEqual(r.data.campaigns.map((c) => c.id), ['7001', '7002'], 'chiến dịch đang chạy lên trước');
   assert.equal(r.data.campaigns[0].daily_budget, 200000);
   assert.equal(r.data.campaigns[1].has_data, false); assert.equal(r.data.campaigns[1].insights.spend, 0);
   assert.ok(graphHits.some((h) => h.includes('act_555/insights') && h.includes('date_preset=last_30d')));
-  assert.ok(!graphWrites.some((g) => g.path.includes('act_')), 'không ghi gì lên tài khoản quảng cáo');
+  r = await owner.req('/api/ads/campaigns/7001?preset=maximum');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.campaign.name, 'Tin nhắn sầu riêng'); assert.equal(r.data.has_data, true);
+  assert.equal(r.data.totals.frequency, 1.75);
+  assert.equal(r.data.totals.actions[0].label, 'Lượt nhấp liên kết');
+  assert.equal(r.data.totals.actions.find((a) => a.type.includes('messaging')).cost, 20000);
+  assert.equal(r.data.daily.length, 2); assert.equal(r.data.daily[1].spend, 400000);
+  assert.equal(r.data.adsets[0].targeting, 'Nam, 25–55 tuổi, Đắk Lắk');
+  assert.equal(r.data.ads[0].post_link, 'https://www.facebook.com/111_1'); assert.equal(r.data.ads[0].adset, 'Nông dân Đắk Lắk');
+  assert.equal(r.data.demographics.length, 2); assert.equal(r.data.platforms[0].platform, 'facebook');
+  r = await owner.req('/api/ads/campaigns/7002?preset=today');
+  assert.equal(r.status, 200); assert.equal(r.data.has_data, false);
+  r = await owner.req('/api/ads/campaigns/abc');
+  assert.equal(r.status, 400);
+  r = await viewer.req('/api/ads/campaigns/7001');
+  assert.equal(r.status, 403);
+  assert.ok(!graphWrites.some((g) => g.path.includes('act_') || g.path.includes('700')), 'không ghi gì lên tài khoản quảng cáo');
   step('quảng cáo: chưa có quyền thì báo rõ, xem tài khoản, chiến dịch, chi tiêu, kết quả theo khoảng ngày, đúng phân quyền, chỉ đọc');
 }
 
@@ -553,7 +583,14 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.waitForSelector('#armsg');
   await page.screenshot({ path: `test-output/${label}-tu-tra-loi.png` });
   await page.keyboard.press('Escape');
+  await page.goto(`${BASE}/#/quang-cao?cd=7001`);
+  await page.waitForSelector('.bars');
+  await page.waitForTimeout(400);
+  const ovc = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(ovc <= 1, `${label} chi tiết chiến dịch: tràn ngang ${ovc}px`);
+  await page.screenshot({ path: `test-output/${label}-chi-tiet-chien-dich.png`, fullPage: true });
   await page.goto(`${BASE}/#/nhan-vien`);
+  await page.waitForSelector('#view table'); // nút Thêm chỉ hoạt động sau khi tải xong danh sách
   await page.click('#add');
   await page.waitForSelector('.modal');
   await page.screenshot({ path: `test-output/${label}-them-nhan-vien.png` });

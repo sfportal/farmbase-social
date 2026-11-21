@@ -209,9 +209,30 @@ details.hook .secret { font-size: 13px; letter-spacing: 0; overflow-wrap: anywhe
 .thread .thead > .only-mobile { justify-self: start; }
 
 /* Quảng cáo */
-.ads-head { flex-wrap: wrap; margin-bottom: 12px; }
+.row.between.ads-head { flex-wrap: wrap; margin-bottom: 12px; }
 table.ads td:nth-child(n+3), table.ads th:nth-child(n+3) { text-align: right; white-space: nowrap; }
 @media (max-width: 640px) {
   table.ads td:nth-child(n+3) { text-align: left; display: flex; justify-content: space-between; gap: 12px; }
   table.ads td[data-l]::before { content: attr(data-l); color: var(--muted); font-size: 13px; }
 }
+table.ads2 td:nth-child(n+2), table.ads2 th:nth-child(n+2) { text-align: right; }
+.hbar { display: flex; align-items: center; gap: 8px; justify-content: flex-end; min-width: 160px; }
+.hbar span { display: block; height: 8px; border-radius: 0 4px 4px 0; background: var(--leaf); max-width: 60%; flex: none; }
+.hbar b { font-weight: 600; white-space: nowrap; }
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 160px; padding: 8px 0; border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+.bar { flex: 1; height: 100%; display: flex; align-items: flex-end; position: relative; cursor: pointer; min-width: 0; outline: none; }
+.bar span { display: block; width: 100%; max-width: 24px; margin: 0 auto; background: var(--leaf); border-radius: 4px 4px 0 0; }
+.bar:hover span, .bar:focus span { background: var(--forest); }
+@media (prefers-color-scheme: dark) { .bar:hover span, .bar:focus span { background: var(--fg); } }
+.bar:hover::after, .bar:focus::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 4px); left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); font-size: 12.5px; padding: 6px 8px; border-radius: 8px; white-space: nowrap; z-index: 5; pointer-events: none; }
+.bar:first-child:hover::after, .bar:first-child:focus::after { left: 0; transform: none; }
+.bar:last-child:hover::after, .bar:last-child:focus::after { left: auto; right: 0; transform: none; }
+details summary { cursor: pointer; color: var(--leaf); margin-top: 10px; }
+@media (max-width: 640px) {
+  table.ads2 td:nth-child(n+2) { text-align: left; display: flex; justify-content: space-between; gap: 12px; }
+  table.ads2 td[data-l]::before { content: attr(data-l); color: var(--muted); font-size: 13px; }
+  .bar:hover::after, .bar:focus::after { display: none; }
+  .hbar { min-width: 0; }
+}
+.ads-head > .grow { flex: 1 1 260px; }
+#cd > .grid { margin-top: 16px; }

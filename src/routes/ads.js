@@ -156,3 +156,110 @@ export async function accountCampaigns(request, env, user, rawId) {
     campaigns: list,
   });
 }
+
+// Tên tiếng Việt cho các loại kết quả hay gặp (loại khác hiện mã gốc của Facebook).
+const ACTION_LABELS = {
+  'onsite_conversion.messaging_conversation_started_7d': 'Cuộc trò chuyện bắt đầu',
+  'onsite_conversion.messaging_first_reply': 'Khách nhắn lần đầu',
+  'onsite_conversion.total_messaging_connection': 'Kết nối nhắn tin',
+  'onsite_conversion.messaging_block': 'Khách chặn tin nhắn',
+  link_click: 'Lượt nhấp liên kết',
+  post_engagement: 'Tương tác với bài viết',
+  page_engagement: 'Tương tác với Trang',
+  post_reaction: 'Cảm xúc',
+  comment: 'Bình luận',
+  post: 'Chia sẻ',
+  'onsite_conversion.post_save': 'Lưu bài viết',
+  like: 'Thích Trang',
+  video_view: 'Lượt xem video (3 giây)',
+  photo_view: 'Lượt xem ảnh',
+  lead: 'Khách hàng tiềm năng',
+  'onsite_conversion.lead_grouped': 'Khách hàng tiềm năng (biểu mẫu)',
+  landing_page_view: 'Lượt xem trang đích',
+  purchase: 'Mua hàng',
+  omni_purchase: 'Mua hàng',
+  add_to_cart: 'Thêm vào giỏ',
+  complete_registration: 'Hoàn tất đăng ký',
+  contact_total: 'Liên hệ',
+};
+const DETAIL_FIELDS = 'spend,impressions,reach,frequency,clicks,ctr,cpc,cpm,inline_link_clicks,actions,cost_per_action_type';
+
+function actionList(row) {
+  const cost = new Map((row?.cost_per_action_type || []).map((x) => [x.action_type, Number(x.value)]));
+  return (row?.actions || [])
+    .map((a) => ({ type: a.action_type, label: ACTION_LABELS[a.action_type] || a.action_type, value: Number(a.value), cost: cost.get(a.action_type) ?? null }))
+    .sort((a, b) => b.value - a.value);
+}
+
+const objId = (v) => {
+  const s = String(v || '');
+  if (!/^\d{1,25}$/.test(s)) throw new HttpError(400, 'Mã chiến dịch không hợp lệ', 'bad_campaign');
+  return s;
+};
+
+// GET /api/ads/campaigns/:id?preset= : chi tiết một chiến dịch (tổng, theo ngày, nhóm quảng cáo, mẫu quảng cáo, độ tuổi, giới tính, vị trí).
+export async function campaignDetail(request, env, user, rawId) {
+  requireRole(user, 'owner', 'manager');
+  const id = objId(rawId);
+  const preset = new URL(request.url).searchParams.get('preset') || 'last_7d';
+  if (!PRESETS.includes(preset)) throw new HttpError(400, 'Khoảng thời gian không hợp lệ', 'bad_preset');
+  const { token } = await userToken(env);
+  const t = { access_token: token };
+  const ins = { ...t, date_preset: preset };
+  try {
+    const c = await graph(env, id, { ...t, fields: 'id,name,status,effective_status,objective,daily_budget,lifetime_budget,budget_remaining,start_time,stop_time,created_time,account_id,bid_strategy' });
+    const [acc, total, daily, adsets, adsetIns, ads, adIns, demo, place] = await Promise.all([
+      graph(env, `act_${c.account_id}`, { ...t, fields: 'currency,name' }),
+      graph(env, `${id}/insights`, { ...ins, fields: DETAIL_FIELDS }),
+      allPages(env, `${id}/insights`, { ...ins, time_increment: '1', fields: 'spend,impressions,clicks,actions', limit: '100' }, 4),
+      allPages(env, `${id}/adsets`, { ...t, fields: 'id,name,effective_status,daily_budget,lifetime_budget,optimization_goal,targeting{age_min,age_max,genders,geo_locations{countries,regions{name},cities{name}}}', limit: '100' }, 2),
+      allPages(env, `${id}/insights`, { ...ins, level: 'adset', fields: `adset_id,${DETAIL_FIELDS}`, limit: '100' }, 2),
+      allPages(env, `${id}/ads`, { ...t, fields: 'id,name,effective_status,adset_id,creative{thumbnail_url,image_url,title,body,effective_object_story_id}', limit: '100' }, 2),
+      allPages(env, `${id}/insights`, { ...ins, level: 'ad', fields: `ad_id,${DETAIL_FIELDS}`, limit: '100' }, 2),
+      allPages(env, `${id}/insights`, { ...ins, breakdowns: 'age,gender', fields: 'spend,impressions,reach,clicks,actions', limit: '100' }, 2),
+      allPages(env, `${id}/insights`, { ...ins, breakdowns: 'publisher_platform', fields: 'spend,impressions,reach,clicks,actions', limit: '50' }, 1),
+    ]);
+    const cur = acc.currency || 'VND';
+    const tRow = total.data?.[0];
+    const shape = (r) => ({ ...shapeInsights(r), frequency: r?.frequency !== undefined ? Number(r.frequency) : null, cpc: r?.cpc !== undefined ? Number(r.cpc) : null, actions: actionList(r) });
+    const asMap = new Map(adsetIns.map((r) => [String(r.adset_id), r]));
+    const adMap = new Map(adIns.map((r) => [String(r.ad_id), r]));
+    const adsetName = new Map(adsets.map((a) => [String(a.id), a.name]));
+    const target = (tg) => {
+      if (!tg) return null;
+      const g = tg.genders?.length === 1 ? (tg.genders[0] === 1 ? 'Nam' : 'Nữ') : 'Nam và nữ';
+      const geo = tg.geo_locations || {};
+      const places = [...(geo.cities || []).map((x) => x.name), ...(geo.regions || []).map((x) => x.name), ...(geo.countries || [])].slice(0, 6);
+      return `${g}, ${tg.age_min || 18}–${tg.age_max || 65}${tg.age_max >= 65 ? '+' : ''} tuổi${places.length ? `, ${places.join(', ')}` : ''}`;
+    };
+    const byRes = (a, b) => (b.insights.spend - a.insights.spend);
+    return json({
+      preset,
+      currency: cur,
+      account: { id: String(c.account_id), name: acc.name },
+      campaign: {
+        id, name: c.name, status: c.effective_status || c.status, objective: c.objective || null,
+        daily_budget: toMoney(c.daily_budget, cur), lifetime_budget: toMoney(c.lifetime_budget, cur), budget_remaining: toMoney(c.budget_remaining, cur),
+        start_time: c.start_time || null, stop_time: c.stop_time || null, created_time: c.created_time || null,
+        link: `https://adsmanager.facebook.com/adsmanager/manage/adsets?act=${encodeURIComponent(c.account_id)}&selected_campaign_ids=${encodeURIComponent(id)}`,
+      },
+      has_data: !!tRow,
+      totals: shape(tRow),
+      daily: daily.map((r) => ({ date: r.date_start, spend: num(r.spend), impressions: num(r.impressions), clicks: num(r.clicks), messages: pickResults(r).messages })),
+      adsets: adsets.map((a) => ({
+        id: String(a.id), name: a.name, status: a.effective_status, optimization_goal: a.optimization_goal || null,
+        daily_budget: toMoney(a.daily_budget, cur), lifetime_budget: toMoney(a.lifetime_budget, cur),
+        targeting: target(a.targeting), has_data: asMap.has(String(a.id)), insights: shape(asMap.get(String(a.id))),
+      })).sort(byRes),
+      ads: ads.map((a) => ({
+        id: String(a.id), name: a.name, status: a.effective_status, adset: adsetName.get(String(a.adset_id)) || null,
+        thumbnail: a.creative?.thumbnail_url || a.creative?.image_url || null,
+        text: a.creative?.body || a.creative?.title || null,
+        post_link: a.creative?.effective_object_story_id ? `https://www.facebook.com/${a.creative.effective_object_story_id}` : null,
+        has_data: adMap.has(String(a.id)), insights: shape(adMap.get(String(a.id))),
+      })).sort(byRes),
+      demographics: demo.map((r) => ({ age: r.age, gender: r.gender, spend: num(r.spend), impressions: num(r.impressions), reach: num(r.reach), clicks: num(r.clicks), messages: pickResults(r).messages })),
+      platforms: place.map((r) => ({ platform: r.publisher_platform, spend: num(r.spend), impressions: num(r.impressions), reach: num(r.reach), clicks: num(r.clicks), messages: pickResults(r).messages })),
+    });
+  } catch (e) { throw adsError(e); }
+}
