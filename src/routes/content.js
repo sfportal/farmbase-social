@@ -139,6 +139,7 @@ export async function createContent(request, env, user) {
 export async function updateContent(request, env, user, id) {
   const row = await loadItem(env, user, id);
   if (!canEdit(user, row)) throw new HttpError(403, 'Quý khách chỉ sửa được bài của mình', 'forbidden');
+  if (row.status === 'scheduled') return updateScheduled(request, env, user, row);
   if (!EDITABLE.includes(row.status)) throw new HttpError(409, 'Bài đã đăng hoặc đã hẹn giờ, không sửa được. Hủy lịch trước nếu cần sửa', 'locked');
   const body = await readJson(request);
   const t = now();
@@ -150,6 +151,35 @@ export async function updateContent(request, env, user, id) {
     'UPDATE social_content SET message = ?, link = ?, image_url = ?, media_ids = ?, scheduled_at = ?, status = ?, reject_reason = NULL, updated_at = ? WHERE id = ?'
   ).bind(f.message, f.link, f.image_url, mediaIds, f.scheduled_at, status, t, row.id).run();
   await audit(env, request, user.id, 'post_updated', snippet(f.message), { id: row.id });
+  return json({ item: shape(await loadItem(env, user, row.id), t) });
+}
+
+// Sửa bài đã hẹn giờ trên Facebook (chưa tới giờ đăng): tạo lịch mới với nội dung mới trước, rồi gỡ lịch cũ,
+// để không bao giờ mất bài khỏi lịch. Chỉ Chủ hệ thống, Quản lý (người được duyệt đăng).
+async function updateScheduled(request, env, user, row) {
+  if (!isManager(user)) throw new HttpError(403, 'Chỉ Chủ hệ thống hoặc Quản lý sửa được bài đã hẹn giờ', 'forbidden');
+  const t = now();
+  if (!row.scheduled_at || row.scheduled_at <= t) throw new HttpError(409, 'Bài đã tới giờ đăng, không sửa được nữa', 'locked');
+  const body = await readJson(request);
+  const mediaIds = body.media_ids === undefined ? row.media_ids : await cleanMediaIds(env, body.media_ids);
+  const f = cleanFields(body, t, !!mediaIds);
+  if (!f.scheduled_at || f.scheduled_at < t + MIN_SCHEDULE) {
+    throw new HttpError(400, 'Bài hẹn giờ cần giờ đăng cách hiện tại ít nhất 10 phút. Muốn đăng ngay, bấm Hủy lịch rồi Duyệt và đăng.', 'bad_time');
+  }
+  const next = { ...row, message: f.message, link: f.link, image_url: f.image_url, media_ids: mediaIds, scheduled_at: f.scheduled_at };
+  const token = await pageToken(env, row.page_id);
+  const data = await sendToFacebook(env, request, next, token, true);
+  const newId = data.post_id || data.id;
+  if (row.fb_post_id) {
+    try { await fbCall(env, 'DELETE', row.fb_post_id, { access_token: token }); } catch (e) {
+      try { await fbCall(env, 'DELETE', newId, { access_token: token }); } catch { /* bỏ qua */ }
+      throw new HttpError(502, `Không gỡ được lịch cũ trên Facebook nên giữ nguyên bài cũ: ${e.message}`, 'facebook');
+    }
+  }
+  await env.DB.prepare(
+    'UPDATE social_content SET message = ?, link = ?, image_url = ?, media_ids = ?, scheduled_at = ?, fb_post_id = ?, last_error = NULL, updated_at = ? WHERE id = ?'
+  ).bind(f.message, f.link, f.image_url, mediaIds, f.scheduled_at, newId, t, row.id).run();
+  await audit(env, request, user.id, 'post_rescheduled', snippet(f.message), { id: row.id, page: row.page_name, fb_post_id: newId, old_fb_post_id: row.fb_post_id });
   return json({ item: shape(await loadItem(env, user, row.id), t) });
 }
 

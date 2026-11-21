@@ -444,7 +444,9 @@ function contentForm(pages, item, perms) {
   const pagePick = editing
     ? `<div class="muted">${esc(item.page_name)}</div>`
     : `<div class="pick">${pages.map((p) => `<label class="check"><input type="checkbox" name="pg" value="${esc(p.id)}" ${pages.length === 1 ? 'checked' : ''}> ${esc(p.name)}</label>`).join('')}</div>`;
-  const btns = perms.can_approve
+  const btns = editing && item.status === 'scheduled'
+    ? '<button type="button" class="btn" data-act="reschedule">Lưu và cập nhật lịch</button>'
+    : perms.can_approve
     ? `<button type="button" class="btn ghost" data-act="draft">Lưu nháp</button><button type="button" class="btn" data-act="publish">Duyệt và đăng</button>`
     : `<button type="button" class="btn ghost" data-act="draft">Lưu nháp</button><button type="button" class="btn" data-act="submit">Gửi duyệt</button>`;
   return `<h2>${editing ? 'Sửa bài' : 'Soạn bài mới'}</h2>
@@ -469,7 +471,7 @@ function contentForm(pages, item, perms) {
         : '<div class="muted small">Chưa bật kho lưu ảnh, video. Tạm thời dán đường dẫn ảnh công khai bên dưới.</div>'}
       <label for="img">Hoặc địa chỉ ảnh có sẵn (không bắt buộc)</label><input id="img" type="url" placeholder="https://… .jpg" value="${esc(item?.image_url || '')}">
       <label for="when">Thời gian đăng</label><input id="when" type="datetime-local" value="${toLocalInput(item?.scheduled_at)}">
-      <div class="muted small">Để trống: đăng ngay khi duyệt. Hẹn giờ: cách hiện tại ít nhất 10 phút, tối đa 30 ngày; Facebook tự đăng đúng giờ.</div>
+      <div class="muted small">${editing && item.status === 'scheduled' ? 'Bài đang hẹn giờ trên Facebook: khi lưu, lịch cũ được thay bằng nội dung và giờ mới. Giờ đăng cách hiện tại ít nhất 10 phút.' : 'Để trống: đăng ngay khi duyệt. Hẹn giờ: cách hiện tại ít nhất 10 phút, tối đa 30 ngày; Facebook tự đăng đúng giờ.'}</div>
       <div id="fmsg"></div>
       <div class="actions"><button type="button" class="btn ghost" data-close>Hủy</button>${editing && !perms.can_approve ? '' : ''}${btns}</div>
     </form>`;
@@ -531,6 +533,10 @@ function openContentForm(pages, item, perms) {
       };
       const msgBox = m.querySelector('#fmsg');
       if (!item && !page_ids.length) { msgBox.innerHTML = '<div class="alert err">Vui lòng chọn ít nhất một Fanpage.</div>'; return; }
+      if (act === 'reschedule') {
+        if (!body.scheduled_at) { msgBox.innerHTML = '<div class="alert err">Vui lòng chọn giờ đăng. Muốn đăng ngay, bấm Hủy lịch rồi Duyệt và đăng.</div>'; return; }
+        if (!(await confirmBox('Cập nhật bài hẹn giờ?', `Lịch trên Facebook sẽ được thay bằng nội dung mới, đăng lúc ${fmtTime(body.scheduled_at)} trên: ${item.page_name}.`, 'Cập nhật'))) return;
+      }
       if (act === 'publish') {
         const names = item ? item.page_name : pages.filter((p) => page_ids.includes(p.id)).map((p) => p.name).join(', ');
         const when = body.scheduled_at && body.scheduled_at > Date.now() / 1000 + 600 ? `hẹn giờ đăng lúc ${fmtTime(body.scheduled_at)}` : 'đăng ngay';
@@ -549,7 +555,7 @@ function openContentForm(pages, item, perms) {
         }
         close();
         const failed = items.filter((i) => i.status === 'failed');
-        toast(failed.length ? `Có ${failed.length} bài đăng lỗi, xem chi tiết trong danh sách` : { draft: 'Đã lưu nháp', submit: 'Đã gửi duyệt', publish: 'Đã gửi lên Facebook' }[act]);
+        toast(failed.length ? `Có ${failed.length} bài đăng lỗi, xem chi tiết trong danh sách` : { draft: 'Đã lưu nháp', submit: 'Đã gửi duyệt', publish: 'Đã gửi lên Facebook', reschedule: 'Đã cập nhật bài hẹn giờ' }[act]);
         loadCalendar();
       } catch (e) {
         msgBox.innerHTML = `<div class="alert err">${esc(e.message)}</div>`;
@@ -577,6 +583,7 @@ function contentCard(c, perms) {
   if (['draft', 'rejected'].includes(c.status) && !perms.can_approve && perms.can_create && mine) acts.push(`<button class="btn sm" data-c-submit="${c.id}">Gửi duyệt</button>`);
   if (perms.can_approve && ['pending', 'draft', 'rejected', 'failed'].includes(c.status)) acts.push(`<button class="btn sm" data-c-approve="${c.id}">${c.status === 'failed' ? 'Đăng lại' : 'Duyệt và đăng'}</button>`);
   if (perms.can_approve && c.status === 'pending') acts.push(`<button class="btn danger sm" data-c-reject="${c.id}">Từ chối</button>`);
+  if (perms.can_approve && c.status === 'scheduled') acts.push(`<button class="btn ghost sm" data-c-edit="${c.id}">Sửa</button>`);
   if (perms.can_approve && c.status === 'scheduled') acts.push(`<button class="btn danger sm" data-c-cancel="${c.id}">Hủy lịch</button>`);
   if (editable) acts.push(`<button class="btn ghost sm" data-c-del="${c.id}">Xóa</button>`);
   if (c.fb_post_id && c.status === 'published') acts.push(`<a class="btn ghost sm" href="https://www.facebook.com/${esc(c.fb_post_id)}" target="_blank" rel="noopener">Xem trên Facebook</a>`);
@@ -1205,7 +1212,7 @@ const ACTIONS = {
   user_created: 'Tạo tài khoản', user_updated: 'Sửa tài khoản', user_unlocked: 'Mở khóa tài khoản',
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
-  post_cancelled: 'Hủy lịch đăng', post_deleted: 'Xóa bài nháp',
+  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', post_deleted: 'Xóa bài nháp',
   media_uploaded: 'Tải ảnh/video lên', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',
