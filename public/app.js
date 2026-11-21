@@ -98,6 +98,7 @@ const I = {
   me: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.2-6 8-6s7 2 8 6"/>',
   report: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   ads: '<path d="M3 10v4l11 5V5z"/><path d="M14 8a4 4 0 0 1 0 8M6 14.5 7.5 20h3l-1.3-4.3"/>',
+  lib: '<path d="M4 4h5v16H4zM10 4h4v16h-4z"/><path d="m15.5 5 3.8-1 2.2 15.6-3.8 1z"/>',
   rule: '<path d="M5 3h11l3 3v15H5z"/><path d="m8.5 12 2 2 4-4M8.5 17h7"/>',
   src: '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/><path d="m15 15 2 2 3-3"/>',
 };
@@ -114,6 +115,7 @@ function navItems() {
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
     { r: 'bao-cao', label: 'Báo cáo', ic: 'report' },
+    { r: 'thu-vien-prompt', href: '/prompt/', label: 'Thư viện prompt', ic: 'lib' },
   ];
   if (me.role === 'owner' || me.role === 'manager') items.push({ r: 'quang-cao', label: 'Quảng cáo', ic: 'ads' });
   if (me.role === 'owner') {
@@ -126,7 +128,7 @@ function navItems() {
 
 function layout(active, title, sub, body, actions = '') {
   const items = navItems();
-  const side = items.map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''} ${i.soon ? 'soon' : ''}" ${i.soon ? 'aria-disabled="true" tabindex="-1"' : ''}>${icon(i.ic)}<span>${i.label}</span>${i.soon ? `<span class="tag">${i.soon}</span>` : ''}${i.r === 'hop-thu' ? '<span class="tag unread" data-unread hidden></span>' : ''}</a>`).join('');
+  const side = items.map((i) => `<a href="${i.href || '#/' + i.r}" class="${i.r === active ? 'on' : ''} ${i.soon ? 'soon' : ''}" ${i.soon ? 'aria-disabled="true" tabindex="-1"' : ''}>${icon(i.ic)}<span>${i.label}</span>${i.soon ? `<span class="tag">${i.soon}</span>` : ''}${i.r === 'hop-thu' ? '<span class="tag unread" data-unread hidden></span>' : ''}</a>`).join('');
   const mobile = ['tong-quan', 'hop-thu', 'lich-dang', 'fanpage', 'tai-khoan']
     .filter(Boolean).map((r) => items.find((i) => i.r === r))
     .map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''}">${icon(i.ic)}<span>${i.label}</span></a>`).join('');
@@ -1622,7 +1624,7 @@ async function viewAudit() {
 function viewAccount() {
   layout('tai-khoan', 'Tài khoản', esc(`${me.email} · ${me.role_label}`), `
     ${me.role === 'owner' ? '<div class="card only-mobile"><h2>Quản trị</h2><div class="row"><a class="btn ghost" href="#/nhan-vien">Nhân viên</a><a class="btn ghost" href="#/nhat-ky">Nhật ký</a></div></div>' : ''}
-    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a><a class="btn ghost" href="#/bao-cao">Báo cáo</a>${me.role !== 'agent' ? '<a class="btn ghost" href="#/nguon-noi-dung">Nguồn nội dung</a>' : ''}${me.role === 'owner' || me.role === 'manager' ? '<a class="btn ghost" href="#/quang-cao">Quảng cáo</a>' : ''}</div></div>
+    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a><a class="btn ghost" href="#/bao-cao">Báo cáo</a><a class="btn ghost" href="/prompt/">Thư viện prompt</a>${me.role !== 'agent' ? '<a class="btn ghost" href="#/nguon-noi-dung">Nguồn nội dung</a>' : ''}${me.role === 'owner' || me.role === 'manager' ? '<a class="btn ghost" href="#/quang-cao">Quảng cáo</a>' : ''}</div></div>
     <div class="card"><h2>Đổi mật khẩu</h2>${passwordForm(false)}</div>
     <div class="card"><h2>Cài lên điện thoại</h2><p class="muted small" style="margin-top:0">
       <b>Android:</b> mở trang này bằng Chrome, bấm menu ⋮ rồi "Cài đặt ứng dụng".<br>

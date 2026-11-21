@@ -10,6 +10,7 @@ import * as media from './routes/media.js';
 import * as writing from './routes/writing.js';
 import * as inbox from './routes/inbox.js';
 import * as ads from './routes/ads.js';
+import * as prompt from './routes/prompt.js';
 import * as report from './routes/report.js';
 import * as sources from './routes/sources.js';
 import * as overviewR from './routes/overview.js';
@@ -68,6 +69,7 @@ const ROUTES = [
   ['GET', '/api/ads/accounts', ads.listAdAccounts],
   ['GET', '/api/ads/accounts/:id/campaigns', ads.accountCampaigns],
   ['GET', '/api/ads/campaigns/:id', ads.campaignDetail],
+  ['GET', '/api/prompt/lien-he', prompt.promptContact, { public: true }],
   ['GET', '/api/fb/connect', fb.fbConnect, { nav: true }],
   ['GET', '/api/fb/callback', fb.fbCallback, { nav: true }],
 ];
