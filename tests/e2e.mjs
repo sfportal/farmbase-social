@@ -100,6 +100,13 @@ const fakeGraph = createServer(async (req, res) => {
   if (u.pathname === '/feed.xml') { res.setHeader('content-type', 'application/rss+xml'); return res.end(`<?xml version="1.0"?><rss version="2.0"><channel><title>Tin Nông Nghiệp Thử</title>
     <item><title>Kỹ thuật bón phân sầu riêng mùa mưa</title><link>http://localhost:8791/bai/1</link><pubDate>Thu, 19 Nov 2026 08:00:00 +0700</pubDate><description><![CDATA[<img src="${BASE}/icons/icon.svg"><p>Bà con cần chia nhỏ lượng phân &amp; bón theo tán.</p>]]></description></item>
     <item><title>Giá cà phê tuần này</title><link>http://localhost:8791/bai/2</link><pubDate>Wed, 18 Nov 2026 08:00:00 +0700</pubDate><description>Giá cà phê tăng nhẹ.</description></item></channel></rss>`); }
+  if (u.pathname === '/news/search') {
+    res.setHeader('content-type', 'application/rss+xml');
+    const q = u.searchParams.get('q');
+    const d = (ago) => new Date(Date.now() - ago * 86400000).toUTCString();
+    const it = (n, ago) => `<item><title>Tin ${n}: ${q.replace(/&/g, '&amp;').replace(/</g, '&lt;')} &amp;#234;</title><link>http://localhost:8791/news/apiclick.aspx?ref=1&amp;url=${encodeURIComponent(`http://localhost:8791/bai/${n}`)}&amp;c=1</link><description>Tóm tắt tin ${n}</description><pubDate>${d(ago)}</pubDate><News:Source>Báo Thử</News:Source><News:Image>${BASE}/icons/icon.svg</News:Image></item>`;
+    return res.end(`<?xml version="1.0"?><rss version="2.0" xmlns:News="https://www.bing.com/news/search?q=&amp;format=rss"><channel><title>Bing</title>${it(3, 1)}${it(4, 3)}${it(5, 40)}</channel></rss>`);
+  }
   if (u.pathname.startsWith('/bai/')) { res.setHeader('content-type', 'text/html; charset=utf-8'); return res.end(`<html><body><nav>Menu</nav><article><h1>Kỹ thuật bón phân</h1><p>${'Bà con nên chia phân thành nhiều lần bón trong mùa mưa để cây hấp thu tốt hơn. '.repeat(6)}</p></article></body></html>`); }
   const vid = u.pathname.match(/^\/v[\d.]+\/(\d+)\/videos$/);
   if (vid) return res.end(JSON.stringify({ data: [{ id: '5501', title: 'Video thăm vườn', description: 'Thăm vườn sầu riêng vùng 07', created_time: '2026-11-20T02:00:00+0000', permalink_url: `/${vid[1]}/videos/5501/`, picture: `${BASE}/icons/icon.svg` }] }));
@@ -639,6 +646,24 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(r.data.items[0].type, 'video');
   assert.equal(r.data.items[0].url, 'https://www.facebook.com/111/videos/5501/');
   assert.equal(r.data.items.filter((i) => i.type === 'post').length, 3);
+  // Tin tức theo từ khóa (Bing News giả): liên kết gốc, ảnh, báo đăng, bỏ tin cũ hơn 15 ngày
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'news', keyword: ' ' } });
+  assert.equal(r.status, 400);
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'news', keyword: 'sầu riêng', site: 'https://www.nongnghiepmoitruong.vn/' } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const newsId = r.data.id;
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'news', keyword: 'sầu riêng', site: 'nongnghiepmoitruong.vn' } });
+  assert.equal(r.status, 409, 'không thêm trùng từ khóa');
+  r = await viewer.req('/api/sources');
+  const ns = r.data.sources.find((s) => s.id === newsId);
+  assert.equal(ns.kind, 'news');
+  assert.equal(ns.name, 'sầu riêng (nongnghiepmoitruong.vn)');
+  r = await viewer.req(`/api/sources/${newsId}/items`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.items.map((i) => i.url), ['http://localhost:8791/bai/3', 'http://localhost:8791/bai/4'], 'liên kết gốc, bỏ tin quá 15 ngày');
+  assert.equal(r.data.items[0].title, 'Tin 3: sầu riêng site:nongnghiepmoitruong.vn ê');
+  assert.equal(r.data.items[0].publisher, 'Báo Thử');
+  assert.ok(r.data.items[0].image.endsWith('/icons/icon.svg'));
   r = await viewer.req('/api/sources/write', { method: 'POST', body: { url: 'http://localhost:8791/bai/1', title: 'Kỹ thuật bón phân', summary: 'Tóm tắt', mode: 'share', page_ids: ['222'] } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.link, 'http://localhost:8791/bai/1');

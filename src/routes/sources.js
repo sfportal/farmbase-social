@@ -35,6 +35,31 @@ async function fetchText(url, accept = 'text/html,application/xhtml+xml,applicat
   return { text: text.slice(0, 2_000_000), type: res.headers.get('content-type') || '', url: res.url || String(url) };
 }
 
+// ---------- Tin tức theo từ khóa (Bing News RSS: có liên kết gốc và ảnh, cập nhật liên tục) ----------
+export const NEWS_DAYS = 15;
+export function newsFeedUrl(env, keyword, site) {
+  const q = site ? `${keyword} site:${site}` : keyword;
+  return `${env.NEWS_SEARCH_BASE || 'https://www.bing.com'}/news/search?q=${encodeURIComponent(q)}&format=rss&cc=VN&setlang=vi`;
+}
+export function parseNews(xml, nowTs = Math.floor(Date.now() / 1000)) {
+  const out = [];
+  for (const b of xml.match(/<item[\s>][\s\S]*?<\/item>/gi) || []) {
+    const link = decode(stripTags(tag(b, 'link')));
+    let url = link;
+    try { url = new URL(link).searchParams.get('url') || link; } catch { continue; }
+    if (!/^https?:\/\//.test(url)) continue;
+    const date = toTs(tag(b, 'pubDate'));
+    if (date && date < nowTs - NEWS_DAYS * 86400) continue;
+    const source = stripTags(decode(tag(b, 'News:Source')));
+    out.push({
+      title: stripTags(decode(tag(b, 'title'))), url, date,
+      image: decode(stripTags(tag(b, 'News:Image'))) || null,
+      summary: short(stripTags(decode(tag(b, 'description')))), type: 'article', publisher: source || null,
+    });
+  }
+  return out.sort((a, b) => (b.date || 0) - (a.date || 0)).slice(0, 40);
+}
+
 // ---------- Đọc RSS / Atom / WordPress ----------
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 export const decode = (s) => String(s || '')
@@ -47,7 +72,7 @@ const tag = (block, name) => { const m = block.match(new RegExp(`<${name}(?:\\s[
 const attr = (block, re) => { const m = block.match(re); return m ? decode(m[1]) : ''; };
 const firstImg = (html) => attr(decode(html), /<img[^>]+src=["']([^"']+)["']/i);
 const toTs = (s) => { const t = Date.parse(decode(s).trim()); return Number.isFinite(t) ? Math.floor(t / 1000) : null; };
-const short = (s, n = 280) => (s.length > n ? `${s.slice(0, n).replace(/\s+\S*$/, '')}…` : s);
+function short(s, n = 280) { return s.length > n ? `${s.slice(0, n).replace(/\s+\S*$/, '')}…` : s; }
 
 export function parseFeed(xml) {
   const items = [];
@@ -122,7 +147,7 @@ export async function listSources(request, env, user) {
   const allowed = await allowedPageIds(env, user);
   const { results } = await env.DB.prepare('SELECT s.*, p.name AS page_name, p.picture_url FROM social_sources s LEFT JOIN social_pages p ON p.id = s.page_id ORDER BY s.created_at DESC').all();
   const sources = results.filter((s) => s.kind === 'website' || allowed.includes(s.page_id))
-    .map((s) => ({ id: s.id, kind: s.kind, name: s.name, url: s.url, page_id: s.page_id, picture: s.picture_url || null, created_at: s.created_at }));
+    .map((s) => ({ id: s.id, kind: s.feed_type === 'news' ? 'news' : s.kind, name: s.name, url: s.url, page_id: s.page_id, picture: s.picture_url || null, created_at: s.created_at }));
   return json({ sources, ai_provider: PROVIDER_LABELS[aiProvider(env)] || null });
 }
 
@@ -151,8 +176,19 @@ export async function createSource(request, env, user) {
     const name = (typeof body.name === 'string' && body.name.trim()) || f.title || u.hostname;
     row = await env.DB.prepare("INSERT INTO social_sources (kind, name, url, feed_url, feed_type, created_by, created_at) VALUES ('website', ?, ?, ?, ?, ?, ?) RETURNING id")
       .bind(name.slice(0, 120), u.toString(), f.feed_url, f.feed_type, user.id, t).first();
+  } else if (body.kind === 'news') {
+    const keyword = String(body.keyword || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+    if (keyword.length < 2) throw new HttpError(400, 'Vui lòng nhập từ khóa', 'bad_keyword');
+    let site = String(body.site || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+    if (site && !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(site)) throw new HttpError(400, 'Tên báo, website không hợp lệ (ví dụ nongnghiepmoitruong.vn)', 'bad_site');
+    const feed = newsFeedUrl(env, keyword, site);
+    const dup = await env.DB.prepare("SELECT id FROM social_sources WHERE feed_type = 'news' AND feed_url = ?").bind(feed).first();
+    if (dup) throw new HttpError(409, 'Từ khóa này đã có trong danh sách nguồn', 'duplicate');
+    const name = `${keyword}${site ? ` (${site})` : ''}`;
+    row = await env.DB.prepare("INSERT INTO social_sources (kind, name, url, feed_url, feed_type, created_by, created_at) VALUES ('website', ?, ?, ?, 'news', ?, ?) RETURNING id")
+      .bind(name, site ? `https://${site}` : null, feed, user.id, t).first();
   } else throw new HttpError(400, 'Loại nguồn không hợp lệ', 'bad_kind');
-  await audit(env, request, user.id, 'source_added', body.kind === 'website' ? String(body.url).slice(0, 120) : String(body.page_id), { id: row.id });
+  await audit(env, request, user.id, 'source_added', body.kind === 'website' ? String(body.url).slice(0, 120) : body.kind === 'news' ? `Từ khóa: ${String(body.keyword).slice(0, 100)}` : String(body.page_id), { id: row.id });
   return json({ id: row.id }, 201);
 }
 
@@ -172,7 +208,7 @@ export async function sourceItems(request, env, user, id) {
   let items = [];
   if (s.kind === 'website') {
     const r = await fetchText(s.feed_url, s.feed_type === 'wp' ? 'application/json' : 'application/rss+xml,application/xml,*/*');
-    items = s.feed_type === 'wp' ? parseWp(JSON.parse(r.text)) : parseFeed(r.text);
+    items = s.feed_type === 'wp' ? parseWp(JSON.parse(r.text)) : s.feed_type === 'news' ? parseNews(r.text) : parseFeed(r.text);
   } else {
     const page = await env.DB.prepare('SELECT access_token_enc, status FROM social_pages WHERE id = ?').bind(s.page_id).first();
     if (!page?.access_token_enc || page.status === 'disconnected') throw new HttpError(409, 'Fanpage chưa kết nối, vui lòng kết nối lại', 'no_token');
@@ -197,7 +233,7 @@ export async function sourceItems(request, env, user, id) {
     }
     items.sort((a, b) => (b.date || 0) - (a.date || 0));
   }
-  return json({ source: { id: s.id, kind: s.kind, name: s.name, url: s.url }, items });
+  return json({ source: { id: s.id, kind: s.feed_type === 'news' ? 'news' : s.kind, name: s.name, url: s.url }, items });
 }
 
 // POST /api/sources/write { url, title, summary, mode: share|rewrite, length, page_ids }
