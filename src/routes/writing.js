@@ -24,9 +24,10 @@ export const parseTags = (s) => [...new Set(String(s || '').match(TAG) || [])].s
 
 // Đọc giới hạn trong quy định: "tối đa 3 biểu tượng", "2 đến 4 hashtag".
 export function ruleLimits(rules) {
-  const e = String(rules || '').match(/tối đa\s+(\d+)\s+biểu tượng/i);
+  const e = String(rules || '').match(/(?:tối đa|đến|tới)\s+(\d+)\s+biểu tượng/i);
+  const e2 = String(rules || '').match(/(\d+)\s*(?:đến|-|tới)\s*\d+\s*biểu tượng/i);
   const h = String(rules || '').match(/(\d+)\s*(?:đến|-|tới)\s*(\d+)\s*hashtag/i);
-  return { maxEmoji: e ? Number(e[1]) : null, minTags: h ? Number(h[1]) : 2, maxTags: h ? Number(h[2]) : 4 };
+  return { minEmoji: e2 ? Number(e2[1]) : 0, maxEmoji: e ? Number(e[1]) : null, minTags: h ? Number(h[1]) : 2, maxTags: h ? Number(h[2]) : 4 };
 }
 
 // Bỏ số điện thoại, câu liên hệ, hashtag AI tự viết; giới hạn biểu tượng; rồi gắn nguồn, liên hệ và hashtag đúng quy định.
@@ -47,7 +48,10 @@ export function enforceStyle(text, { rules = '', contact = '', hashtags = '', so
     });
     return keep.join(' ').replace(/[ \t]+$/g, '');
   }).join('\n');
+  // Biểu tượng: không đặt liền nhau, không quá giới hạn; thiếu thì thêm một biểu tượng ở câu mở đầu.
+  body = body.replace(/(\p{Extended_Pictographic}\uFE0F?)(?:\s*\p{Extended_Pictographic}\uFE0F?)+/gu, '$1');
   if (lim.maxEmoji !== null) { let n = 0; body = body.replace(EMOJI, (m) => (++n > lim.maxEmoji ? '' : m)); }
+  if (lim.minEmoji > 0 && !/\p{Extended_Pictographic}/u.test(body) && body.trim()) body = `🌱 ${body.trimStart()}`;
   body = body.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const allowed = parseTags(hashtags);
   let tags = [];
@@ -88,10 +92,15 @@ export async function saveRules(request, env, user) {
 
 export function systemPrompt(rules, pageNames, style = {}) {
   const auto = style.contact || style.hashtags;
+  const lim = ruleLimits(rules);
+  const emo = lim.maxEmoji !== null
+    ? `Dùng ${lim.minEmoji ? `${lim.minEmoji} đến ` : 'tối đa '}${lim.maxEmoji} biểu tượng cảm xúc phù hợp chủ đề (ví dụ 🌱 🌿 🍈 ☕ ✅ 📌 📲 👉) cho bài sinh động: đặt ở đầu câu mở đầu, trước ý chính hoặc lời kêu gọi; không đặt hai biểu tượng liền nhau, không rải mỗi câu một biểu tượng.`
+    : 'Có thể dùng vài biểu tượng cảm xúc phù hợp cho sinh động, không lạm dụng.';
   return [
     'Bạn là người viết nội dung Fanpage Facebook cho doanh nghiệp Việt Nam.',
     'Viết bằng tiếng Việt có dấu, tự nhiên, đúng chính tả. Chỉ trả về đúng nội dung bài đăng, không giải thích, không tiêu đề kiểu Markdown, không dùng ** hay #.',
     'Không bịa số liệu, giá, ngày tháng, tên người hoặc cam kết không có trong ý chính. Thiếu thông tin thì viết chung, không tự thêm.',
+    emo,
     pageNames.length ? `Bài sẽ đăng trên Fanpage: ${pageNames.join(', ')}.` : '',
     rules ? `QUY ĐỊNH ĐĂNG BÀI CỦA DOANH NGHIỆP (bắt buộc tuân theo, ưu tiên cao nhất):\n${rules}` : '',
     auto ? `Không tự viết số điện thoại, website hay câu "liên hệ qua số..." vì hệ thống tự thêm phần liên hệ chuẩn ở cuối bài${style.contact ? ` (${style.contact})` : ''}. Kết bài bằng một câu kêu gọi ngắn không kèm số.${style.hashtags ? ` Dòng cuối ghi 2 đến 4 hashtag chọn trong danh sách: ${style.hashtags}.` : ''}` : 'Không tự bịa số điện thoại hay địa chỉ website.',
