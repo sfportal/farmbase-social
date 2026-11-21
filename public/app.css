@@ -254,3 +254,20 @@ table.rep tr.total td { border-bottom: 0; }
 }
 #rep > details.card { margin-top: 16px; }
 #rep details.card > summary { margin: 0 0 8px; color: var(--fg); }
+
+.heat { display: grid; grid-template-columns: 40px repeat(24, minmax(16px, 1fr)); gap: 2px; min-width: 460px; align-items: center; }
+.heat .hh { font-size: 11px; color: var(--muted); text-align: left; }
+.heat .hd { font-size: 12px; color: var(--muted); }
+.hc { display: inline-block; height: 18px; border-radius: 4px; background: var(--line); opacity: .55; }
+.heat .hc { width: 100%; }
+.hc.l1 { background: #A9DCC2; opacity: 1; } .hc.l2 { background: #6CC39A; opacity: 1; } .hc.l3 { background: #35A576; opacity: 1; } .hc.l4 { background: #0B6B4F; opacity: 1; }
+.heat-key { margin-top: 8px; gap: 4px; }
+.heat-key .hc { width: 16px; height: 12px; }
+.rposts { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.rpost { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; color: var(--fg); text-decoration: none; display: flex; flex-direction: column; }
+.rpost img, .rpost .rtext { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--sprout); }
+.rpost .rtext { padding: 10px; font-size: 13px; overflow: hidden; }
+.rpost .rbody { padding: 10px 12px; }
+.rpost .rv { font-size: 15px; margin: 2px 0; }
+.rpost .rv b { font-size: 20px; }
+@media (max-width: 640px) { .rposts { grid-template-columns: 1fr 1fr; } }
