@@ -880,7 +880,11 @@ function groupWeeks(daily) {
 
 // ---------- Nguồn nội dung: website và Fanpage để chọn bài chia sẻ hoặc cho AI viết lại ----------
 const SRC_TYPE = { article: 'Bài viết', post: 'Bài đăng', video: 'Video' };
-let srcState = { id: null, type: '' };
+let srcState = { id: null, type: '', kw: (() => { try { return localStorage.getItem('fbsKw') || ''; } catch { return ''; } })() };
+let srcCache = { key: '', items: [], errors: [] };
+// Bỏ dấu để tìm "sau rieng" vẫn khớp "sầu riêng".
+const fold = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
+const kwList = (t) => String(t || '').split(/[,;\n]/).map((k) => fold(k).trim()).filter(Boolean);
 async function viewSources() {
   layout('nguon-noi-dung', 'Nguồn nội dung', 'Xem bài viết, bài đăng, video từ website và Fanpage để chia sẻ hoặc cho AI viết bài mới', '<div class="muted">Đang tải…</div>', '<button class="btn" id="addsrc">Thêm nguồn</button>');
   const [{ sources, ai_provider }, { pages }] = await Promise.all([api('/api/sources'), api('/api/pages')]);
@@ -892,21 +896,25 @@ async function viewSources() {
   if (!sources.length) {
     v.innerHTML = `<div class="card"><p style="margin-top:0">Chưa có nguồn nào. Bấm <b>Thêm nguồn</b> để thêm website (ví dụ farmbase.vn, trang tin nông nghiệp) hoặc Fanpage đã kết nối.</p>${aiNote}</div>`;
   } else {
-    if (!sources.some((s) => String(s.id) === String(srcState.id))) srcState.id = sources[0].id;
-    v.innerHTML = `<div class="card filters f3">
-        <div><label for="ssel">Nguồn</label><select id="ssel">${sources.map((s) => `<option value="${s.id}">${s.kind === 'fanpage' ? 'Fanpage: ' : 'Website: '}${esc(s.name)}</option>`).join('')}</select></div>
+    if (srcState.id !== 'all' && !sources.some((s) => String(s.id) === String(srcState.id))) srcState.id = sources.length > 1 ? 'all' : sources[0].id;
+    v.innerHTML = `<div class="card filters fsrc">
+        <div><label for="ssel">Nguồn</label><select id="ssel">${sources.length > 1 ? `<option value="all">Tất cả nguồn (${sources.length})</option>` : ''}${sources.map((s) => `<option value="${s.id}">${s.kind === 'fanpage' ? 'Fanpage: ' : 'Website: '}${esc(s.name)}</option>`).join('')}</select></div>
         <div><label for="stype">Loại</label><select id="stype"><option value="">Tất cả</option><option value="article">Bài viết</option><option value="post">Bài đăng</option><option value="video">Video</option></select></div>
+        <div class="kw"><label for="skw">Từ khóa</label><input id="skw" type="search" placeholder="Ví dụ: sầu riêng, truy xuất nguồn gốc" value="${esc(srcState.kw)}"></div>
         <div class="end row"><button class="btn ghost" id="sreload">Tải lại</button>${me.role === 'owner' || me.role === 'manager' ? '<button class="btn ghost danger" id="srm">Bỏ nguồn</button>' : ''}</div></div>
       <div class="card">${aiNote}<div class="muted small">Chia sẻ: AI viết lời giới thiệu ngắn kèm liên kết bài gốc. AI viết bài: AI đọc bài gốc và viết bài mới, cuối bài luôn ghi "Nguồn:". Bài chỉ lên Fanpage sau khi Quý khách duyệt.</div></div>
       <div id="sitems"></div>`;
-    const sel = document.getElementById('ssel'); const ty = document.getElementById('stype');
-    sel.value = String(srcState.id); ty.value = srcState.type;
-    sel.onchange = () => { srcState.id = sel.value; loadSourceItems(usable); };
-    ty.onchange = () => { srcState.type = ty.value; loadSourceItems(usable); };
-    document.getElementById('sreload').onclick = () => loadSourceItems(usable);
+    const sel = document.getElementById('ssel'); const ty = document.getElementById('stype'); const kw = document.getElementById('skw');
     const rm = document.getElementById('srm');
+    const syncRm = () => { if (rm) rm.disabled = srcState.id === 'all'; };
+    sel.value = String(srcState.id); ty.value = srcState.type; syncRm();
+    sel.onchange = () => { srcState.id = sel.value; syncRm(); loadSourceItems(usable, sources); };
+    ty.onchange = () => { srcState.type = ty.value; renderSourceItems(usable); };
+    let t;
+    kw.oninput = () => { clearTimeout(t); t = setTimeout(() => { srcState.kw = kw.value; try { localStorage.setItem('fbsKw', kw.value); } catch {} renderSourceItems(usable); }, 250); };
+    document.getElementById('sreload').onclick = () => { srcCache.key = ''; loadSourceItems(usable, sources); };
     if (rm) rm.onclick = () => removeSource(sources.find((s) => String(s.id) === String(srcState.id)));
-    loadSourceItems(usable);
+    loadSourceItems(usable, sources);
   }
   document.getElementById('addsrc').onclick = () => openAddSource(usable);
 }
@@ -946,17 +954,39 @@ async function removeSource(s) {
   try { await api(`/api/sources/${s.id}`, { method: 'DELETE' }); srcState.id = null; toast('Đã bỏ nguồn'); viewSources(); } catch (e) { toast(e.message); }
 }
 
-async function loadSourceItems(pages) {
+async function loadSourceItems(pages, sources) {
   const box = document.getElementById('sitems');
   if (!box) return;
-  box.innerHTML = '<div class="muted">Đang đọc nội dung…</div>';
-  let d;
-  try { d = await api(`/api/sources/${encodeURIComponent(srcState.id)}/items`, { quiet: true }); } catch (e) { box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
-  const items = d.items.filter((i) => !srcState.type || i.type === srcState.type);
-  if (!items.length) { box.innerHTML = '<div class="card"><p class="muted" style="margin:0">Chưa có nội dung phù hợp.</p></div>'; return; }
-  box.innerHTML = `<div class="srcgrid">${items.map((it, i) => `<article class="srcitem">
+  const list = srcState.id === 'all' ? sources : sources.filter((s) => String(s.id) === String(srcState.id));
+  const key = list.map((s) => s.id).join(',');
+  if (srcCache.key !== key) {
+    box.innerHTML = `<div class="muted">Đang đọc nội dung${list.length > 1 ? ` từ ${list.length} nguồn` : ''}…</div>`;
+    const res = await Promise.allSettled(list.map((s) => api(`/api/sources/${encodeURIComponent(s.id)}/items`, { quiet: true })));
+    const items = []; const errors = [];
+    res.forEach((r, i) => {
+      if (r.status === 'fulfilled') r.value.items.forEach((it) => items.push({ ...it, src: list[i].name }));
+      else errors.push(`${list[i].name}: ${r.reason.message}`);
+    });
+    items.sort((a, b) => (b.date || 0) - (a.date || 0));
+    const seen = new Set();
+    srcCache = { key, items: items.filter((it) => (seen.has(it.url) ? false : seen.add(it.url))), errors };
+  }
+  renderSourceItems(pages);
+}
+
+function renderSourceItems(pages) {
+  const box = document.getElementById('sitems');
+  if (!box) return;
+  const kws = kwList(srcState.kw);
+  const many = srcState.id === 'all';
+  const items = srcCache.items.filter((i) => (!srcState.type || i.type === srcState.type)
+    && (!kws.length || kws.some((k) => fold(`${i.title} ${i.summary}`).includes(k))));
+  const err = srcCache.errors.length ? `<div class="alert err small">Không đọc được: ${srcCache.errors.map(esc).join('; ')}</div>` : '';
+  const head = kws.length ? `<div class="muted small srccount">Có <b>${items.length}</b> bài khớp từ khóa (${kws.length > 1 ? 'chứa một trong các từ' : 'chứa từ'} đã nhập), trong ${srcCache.items.length} bài mới nhất.</div>` : '';
+  if (!items.length) { box.innerHTML = `${err}${head}<div class="card"><p class="muted" style="margin:0">${kws.length ? 'Chưa có bài nào khớp từ khóa. Quý khách thử từ khóa khác hoặc chọn "Tất cả nguồn".' : 'Chưa có nội dung phù hợp.'}</p></div>`; return; }
+  box.innerHTML = `${err}${head}<div class="srcgrid">${items.map((it, i) => `<article class="srcitem">
       ${it.image ? `<img src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
-      <div class="sbody"><div class="muted small"><span class="tag">${SRC_TYPE[it.type] || 'Bài viết'}</span> ${it.date ? fmtTime(it.date) : ''}</div>
+      <div class="sbody"><div class="muted small"><span class="tag">${SRC_TYPE[it.type] || 'Bài viết'}</span> ${it.date ? fmtTime(it.date) : ''}</div>${many ? `<div class="muted small">${esc(it.src)}</div>` : ''}
         <h3>${esc(it.title)}</h3><p class="muted small">${esc(it.summary || '')}</p></div>
       <div class="row sact"><button class="btn sm" data-share="${i}">Chia sẻ</button><button class="btn ghost sm" data-rew="${i}">AI viết bài</button><a class="btn ghost sm" href="${esc(it.url)}" target="_blank" rel="noopener">Mở</a></div>
     </article>`).join('')}</div>`;
