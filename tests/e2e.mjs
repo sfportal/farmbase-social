@@ -309,10 +309,25 @@ assert.deepEqual(r.data.items.map((i) => i.status), ['scheduled', 'scheduled']);
 assert.equal(graphWrites.length, 2);
 assert.deepEqual([graphWrites[0].params.published, graphWrites[0].params.scheduled_publish_time, graphWrites[0].params.link], ['false', String(at), 'https://farmbase.vn/']);
 const schedId = r.data.items[0].id;
+const r0sched = r.data.items;
 graphWrites.length = 0;
 r = await owner.req(`/api/content/${schedId}/cancel`, { method: 'POST' });
 assert.equal(r.data.item.status, 'draft');
 assert.equal(graphWrites[0].method, 'DELETE');
+// Sửa bài đã hẹn giờ (Trang 222): tạo lịch mới trước rồi gỡ lịch cũ; biên tập viên không sửa được; phải giữ giờ hẹn
+const sched2 = r0sched[1];
+r = await viewer.req(`/api/content/${sched2.id}`, { method: 'PATCH', body: { message: 'biên tập sửa', scheduled_at: at } });
+assert.equal(r.status, 403, 'biên tập viên không sửa bài đã hẹn giờ');
+r = await owner.req(`/api/content/${sched2.id}`, { method: 'PATCH', body: { message: 'Thông báo hội thảo (sửa)', link: 'https://farmbase.vn/', scheduled_at: null } });
+assert.equal(r.status, 400, 'bài hẹn giờ phải giữ giờ đăng');
+graphWrites.length = 0;
+const at3 = at + 3600;
+r = await owner.req(`/api/content/${sched2.id}`, { method: 'PATCH', body: { message: 'Thông báo hội thảo (sửa)', link: 'https://farmbase.vn/', scheduled_at: at3 } });
+assert.equal(r.status, 200, JSON.stringify(r.data));
+assert.equal(r.data.item.status, 'scheduled'); assert.equal(r.data.item.scheduled_at, at3); assert.equal(r.data.item.message, 'Thông báo hội thảo (sửa)');
+assert.deepEqual(graphWrites.map((w) => [w.method, w.path]), [['POST', '/v27.0/222/feed'], ['DELETE', `/v27.0/${sched2.fb_post_id}`]]);
+assert.equal(graphWrites[0].params.scheduled_publish_time, String(at3));
+assert.notEqual(r.data.item.fb_post_id, sched2.fb_post_id);
 // Bước duyệt: người duyệt chọn lại Fanpage (thêm Trang 111) và giờ hẹn
 r = await viewer.req('/api/content', { method: 'POST', body: { page_ids: ['222'], message: 'Bài chờ chọn Trang', action: 'submit' } });
 const pickId = r.data.items[0].id;
@@ -389,7 +404,7 @@ assert.ok(r.data.counts.published >= 1 && r.data.counts.scheduled === 3 && r.dat
 r = await viewer.req('/api/content');
 assert.ok(r.data.items.every((i) => i.page_id === '222'), 'biên tập chỉ thấy bài của Trang được giao');
 r = await owner.req('/api/audit');
-assert.ok(['post_published', 'post_scheduled', 'post_cancelled', 'post_rejected', 'post_publish_failed'].every((a) => r.data.entries.some((e) => e.action === a)));
+assert.ok(['post_published', 'post_scheduled', 'post_cancelled', 'post_rescheduled', 'post_rejected', 'post_publish_failed'].every((a) => r.data.entries.some((e) => e.action === a)));
 step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Trang và giờ khi duyệt, quy định và AI viết bài, tải nhiều ảnh và video, hẹn giờ nhiều Trang, hủy lịch, báo lỗi, đúng quyền');
 
 
