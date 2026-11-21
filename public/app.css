@@ -330,3 +330,35 @@ table.rep tr.total td { border-bottom: 0; }
   .mt { width: 100%; height: 30px; }
   .mi2:not(:has(.mt))::after { content: "•"; color: var(--muted); }
 }
+/* Tổng quan */
+.kpis { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.kpi { text-decoration: none; color: inherit; display: block; transition: border-color .15s; }
+.kpi:hover { border-color: var(--leaf); }
+.kpi .n { font-size: 26px; }
+.kpi.attn { border-color: var(--gold); }
+.ovgrid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); margin-top: 16px; }
+.ovgrid h2 { margin: 0 0 8px; }
+.ovgrid h3.sub { font-size: 14px; margin: 14px 0 6px; color: var(--muted); }
+.hrow { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); text-decoration: none; color: inherit; min-width: 0; }
+.hrow:first-of-type { border-top: 0; }
+.hrow .mt { width: 44px; height: 44px; flex: 0 0 auto; border-radius: 6px; overflow: hidden; background: var(--sprout); display: grid; place-items: center; }
+.hrow .mt img { width: 100%; height: 100%; object-fit: cover; }
+.hrow .grow { display: flex; flex-direction: column; min-width: 0; }
+.todos { display: grid; gap: 8px; }
+.todo { display: block; padding: 10px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--fg); text-decoration: none; }
+.todo.err { background: var(--danger-bg); }
+.todo b { font-size: 18px; margin-right: 4px; }
+h2.sec { margin: 22px 0 10px; }
+.pcards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.pcard { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pch { gap: 10px; align-items: center; min-width: 0; }
+.pch .av { width: 42px; height: 42px; border-radius: 50%; background: var(--sprout); flex: 0 0 auto; object-fit: cover; }
+.pch .grow { min-width: 0; }
+.pm { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 6px; }
+.pm div { font-size: 11.5px; color: var(--muted); line-height: 1.25; }
+.pm span { display: block; font-size: 17px; font-weight: 700; color: var(--fg); }
+.pm .hot span { color: var(--danger); }
+.err-t { color: var(--danger); }
+.pact { gap: 6px; flex-wrap: wrap; }
+@media (max-width: 899px) { .ovgrid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi .n { font-size: 22px; } .pcards { grid-template-columns: 1fr; } }

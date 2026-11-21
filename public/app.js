@@ -226,34 +226,88 @@ async function logout() {
   go('dang-nhap');
 }
 
-// ---------- Tổng quan ----------
+// ---------- Tổng quan: hoạt động nội dung và tình hình từng Fanpage ----------
 async function viewHome() {
-  layout('tong-quan', `Chào ${me.name || 'Quý khách'}`, 'Tình hình các Fanpage Quý khách đang quản lý', '<div class="muted">Đang tải…</div>');
-  const { pages } = await api('/api/pages');
-  const active = pages.filter((p) => p.status === 'active');
-  const followers = active.reduce((s, p) => s + (p.followers_count || 0), 0);
-  const fans = active.reduce((s, p) => s + (p.fan_count || 0), 0);
-  const errors = pages.filter((p) => p.status === 'error');
-  document.getElementById('view').innerHTML = `
-    ${errors.length ? `<div class="alert err">${errors.length} Fanpage đang lỗi kết nối. <a href="#/fanpage">Xem chi tiết</a></div>` : ''}
-    <div class="grid">
-      <div class="card stat"><div class="muted small">Fanpage đang quản lý</div><div class="n">${fmtNum(active.length)}</div></div>
-      <div class="card stat"><div class="muted small">Tổng người theo dõi</div><div class="n">${fmtNum(followers)}</div></div>
-      <div class="card stat"><div class="muted small">Tổng lượt thích Trang</div><div class="n">${fmtNum(fans)}</div></div>
-    </div>
-    ${pages.length ? '' : `<div class="card" style="margin-top:16px"><h2>Bắt đầu</h2><p class="muted">${me.role === 'owner'
+  layout('tong-quan', `Chào ${me.name || 'Quý khách'}`, 'Hoạt động nội dung và tình hình các Fanpage Quý khách đang quản lý', '<div class="muted">Đang tải…</div>',
+    me.role !== 'agent' ? '<a class="btn" href="#/lich-dang" id="hnew">Soạn bài</a>' : '');
+  const [{ pages }, cont, ov] = await Promise.all([
+    api('/api/pages'),
+    api('/api/content').catch(() => ({ items: [] })),
+    api('/api/overview').catch(() => ({ pages: {} })),
+  ]);
+  const v = document.getElementById('view');
+  if (!pages.length) {
+    v.innerHTML = `<div class="card"><h2>Bắt đầu</h2><p class="muted">${me.role === 'owner'
       ? 'Chưa có Fanpage nào. Vào mục Fanpage và bấm "Kết nối Fanpage" để đăng nhập Facebook và chọn các Trang cần quản lý.'
-      : 'Quý khách chưa được giao Fanpage nào. Vui lòng liên hệ Chủ hệ thống.'}</p>
-      ${me.role === 'owner' ? '<a class="btn" href="#/fanpage">Đến mục Fanpage</a>' : ''}</div>`}
-    <div class="card" style="margin-top:16px"><h2>Lộ trình</h2>
-      <ul class="muted" style="margin:0;padding-left:20px">
-        <li><b>Giai đoạn 1 (đang dùng):</b> tài khoản, phân quyền, kết nối Fanpage, số liệu cơ bản.</li>
-        <li><b>Đã có:</b> xem bài đăng và số tương tác từng bài theo Fanpage (mục Bài đăng).</li>
-        <li><b>Đã có:</b> lịch đăng bài, duyệt bài, đăng ngay hoặc hẹn giờ lên Fanpage (mục Lịch đăng).</li>
-        <li><b>Đã có:</b> hộp thư chung tin nhắn và bình luận, trả lời ngay trong hệ thống, tự nhắn tin khi khách bình luận (mục Hộp thư).</li>
-        <li><b>Đã có:</b> xem chiến dịch quảng cáo, chi tiêu, tin nhắn và chi phí mỗi kết quả (mục Quảng cáo).</li>
-        <li><b>Giai đoạn 4:</b> CRM mini, ghi đơn, AI bán hàng, báo cáo tuần.</li>
-      </ul></div>`;
+      : 'Quý khách chưa được giao Fanpage nào. Vui lòng liên hệ Chủ hệ thống.'}</p>${me.role === 'owner' ? '<a class="btn" href="#/fanpage">Đến mục Fanpage</a>' : ''}</div>`;
+    return;
+  }
+  const t = Date.now() / 1000; const week = t - 7 * 86400;
+  const items = cont.items || [];
+  const shown = pages.filter((p) => p.status !== 'disconnected');
+  const per = Object.fromEntries(shown.map((p) => [p.id, { scheduled: 0, pending: 0, failed: 0, draft: 0, pub7: 0, last: 0, next: 0, ...(ov.pages?.[p.id] || {}) }]));
+  for (const c of items) {
+    const x = per[c.page_id]; if (!x) continue;
+    if (c.status === 'scheduled' && c.scheduled_at > t) { x.scheduled++; if (!x.next || c.scheduled_at < x.next) x.next = c.scheduled_at; }
+    if (c.status === 'pending') x.pending++;
+    if (c.status === 'failed') x.failed++;
+    if (c.status === 'draft' || c.status === 'rejected') x.draft++;
+    if (c.status === 'published') { if (c.published_at >= week) x.pub7++; if (c.published_at > x.last) x.last = c.published_at; }
+  }
+  const sum = (k) => Object.values(per).reduce((a, x) => a + (x[k] || 0), 0);
+  const active = shown.filter((p) => p.status === 'active');
+  const errors = shown.filter((p) => p.status === 'error');
+  const followers = active.reduce((a, p) => a + (p.followers_count || 0), 0);
+  const upcoming = items.filter((c) => c.status === 'scheduled' && c.scheduled_at > t).sort((a, b) => a.scheduled_at - b.scheduled_at).slice(0, 6);
+  const recent = items.filter((c) => c.status === 'published').sort((a, b) => (b.published_at || 0) - (a.published_at || 0)).slice(0, 5);
+  const kpi = (label, n, sub, href, attn) => `<a class="card stat kpi ${attn ? 'attn' : ''}" href="${href}"><div class="muted small">${label}</div><div class="n">${fmtNum(n)}</div>${sub ? `<div class="muted small">${sub}</div>` : ''}</a>`;
+  const row = (c, when) => `<a class="hrow" href="#/lich-dang" data-hgo="${c.id}"><span class="mt">${itemThumb(c) || ''}</span>
+      <span class="grow"><span class="small"><b>${esc(when)}</b> · ${esc(c.page_name)}</span><span class="muted small ellipsis">${esc((c.message || '(Bài chỉ có ảnh, video hoặc liên kết)').split('\n')[0])}</span></span></a>`;
+  const todo = [
+    sum('pending') && (me.role === 'owner' || me.role === 'manager') ? `<a class="todo" href="#/lich-dang" data-hst="pending"><b>${sum('pending')}</b> bài chờ duyệt</a>` : '',
+    sum('pending') && !(me.role === 'owner' || me.role === 'manager') ? `<a class="todo" href="#/lich-dang" data-hst="pending"><b>${sum('pending')}</b> bài đang chờ Quản lý duyệt</a>` : '',
+    sum('failed') ? `<a class="todo err" href="#/lich-dang" data-hst="failed"><b>${sum('failed')}</b> bài đăng lỗi, cần đăng lại</a>` : '',
+    sum('waiting') ? `<a class="todo" href="#/hop-thu"><b>${sum('waiting')}</b> khách đang chờ trả lời (7 ngày)</a>` : '',
+    sum('unread') ? `<a class="todo" href="#/hop-thu"><b>${sum('unread')}</b> tin nhắn, bình luận chưa đọc</a>` : '',
+    errors.length ? `<a class="todo err" href="#/fanpage"><b>${errors.length}</b> Fanpage lỗi kết nối</a>` : '',
+    sum('draft') && me.role !== 'agent' ? `<a class="todo" href="#/lich-dang" data-hst="draft"><b>${sum('draft')}</b> bài nháp chưa gửi</a>` : '',
+  ].filter(Boolean);
+  v.innerHTML = `
+    <div class="kpis">
+      ${kpi('Fanpage đang hoạt động', active.length, `trên ${shown.length} Trang`, '#/fanpage', errors.length)}
+      ${kpi('Người theo dõi', followers, 'tổng các Trang', '#/bao-cao')}
+      ${kpi('Chưa đọc', sum('unread'), `${fmtNum(sum('waiting'))} khách chờ trả lời`, '#/hop-thu', sum('waiting'))}
+      ${kpi('Chờ duyệt', sum('pending'), `${fmtNum(sum('failed'))} bài lỗi`, '#/lich-dang', sum('failed'))}
+      ${kpi('Hẹn giờ sắp đăng', sum('scheduled'), upcoming[0] ? `gần nhất ${fmtTime(upcoming[0].scheduled_at)}` : 'chưa có lịch', '#/lich-dang')}
+      ${kpi('Đã đăng 7 ngày', sum('pub7'), `${fmtNum(sum('msg_in'))} tin nhắn · ${fmtNum(sum('cmt_in'))} bình luận`, '#/bai-dang')}
+    </div>
+    <div class="ovgrid">
+      <div class="card"><div class="row between"><h2>Sắp đăng</h2><a class="small" href="#/lich-dang" data-hview="month">Xem lịch tháng</a></div>
+        ${upcoming.length ? upcoming.map((c) => row(c, fmtTime(c.scheduled_at))).join('') : `<p class="muted small" style="margin:0">Chưa có bài hẹn giờ.${me.role !== 'agent' ? ' <a href="#/lich-dang">Soạn bài</a> hoặc lấy ý tưởng ở <a href="#/nguon-noi-dung">Nguồn nội dung</a>.' : ''}</p>`}
+        ${recent.length ? `<h3 class="sub">Vừa đăng</h3>${recent.map((c) => row(c, fmtTime(c.published_at))).join('')}` : ''}
+      </div>
+      <div class="card"><h2>Cần xử lý</h2>
+        ${todo.length ? `<div class="todos">${todo.join('')}</div>` : '<p class="muted small" style="margin:0">Không có việc tồn đọng. Mọi thứ đang ổn.</p>'}
+      </div>
+    </div>
+    <h2 class="sec">Từng Fanpage</h2>
+    <div class="pcards">${shown.map((p) => { const x = per[p.id]; const [sl, sc] = STATUS[p.status] || [p.status, 'off']; return `<div class="card pcard">
+      <div class="row pch">${p.picture_url ? `<img class="av" src="${esc(p.picture_url)}" alt="" referrerpolicy="no-referrer">` : '<span class="av"></span>'}
+        <div class="grow"><b class="ellipsis">${esc(p.name)}</b><div class="small"><span class="badge ${sc}">${sl}</span>${x.next ? ` <span class="muted">· Bài kế tiếp ${fmtTime(x.next)}</span>` : ''}</div></div></div>
+      <div class="pm">
+        <div><span>${fmtNum(p.followers_count || 0)}</span>theo dõi</div><div><span>${fmtNum(p.fan_count || 0)}</span>lượt thích</div>
+        <div class="${x.unread ? 'hot' : ''}"><span>${fmtNum(x.unread)}</span>chưa đọc</div><div class="${x.waiting ? 'hot' : ''}"><span>${fmtNum(x.waiting)}</span>chờ trả lời</div>
+        <div><span>${fmtNum(x.msg_in)}</span>tin nhắn 7 ngày</div><div><span>${fmtNum(x.cmt_in)}</span>bình luận 7 ngày</div>
+        <div><span>${fmtNum(x.pub7)}</span>đã đăng 7 ngày</div><div><span>${fmtNum(x.scheduled)}</span>hẹn giờ</div>
+      </div>
+      <div class="muted small">${x.last ? `Bài gần nhất: ${fmtTime(x.last)}` : 'Chưa có bài đăng qua hệ thống'}${x.pending ? ` · ${x.pending} chờ duyệt` : ''}${x.failed ? ` · <span class="err-t">${x.failed} lỗi</span>` : ''}</div>
+      <div class="row pact"><a class="btn ghost sm" href="#/bao-cao" data-hrep="${esc(p.id)}">Báo cáo</a><a class="btn ghost sm" href="#/hop-thu">Hộp thư</a>${me.role !== 'agent' ? `<a class="btn ghost sm" href="#/lich-dang" data-hpage="${esc(p.id)}">Lịch đăng</a>` : ''}</div>
+    </div>`; }).join('')}</div>`;
+  v.querySelectorAll('[data-hst]').forEach((a) => (a.onclick = () => { calState.status = a.dataset.hst; calState.view = 'list'; }));
+  v.querySelectorAll('[data-hview]').forEach((a) => (a.onclick = () => { calState.view = 'month'; calState.status = ''; }));
+  v.querySelectorAll('[data-hgo]').forEach((a) => (a.onclick = () => { calState.view = 'list'; calState.status = ''; }));
+  v.querySelectorAll('[data-hpage]').forEach((a) => (a.onclick = () => { calState.page = a.dataset.hpage; calState.status = ''; }));
+  v.querySelectorAll('[data-hrep]').forEach((a) => (a.onclick = () => { repState.page = a.dataset.hrep; }));
 }
 
 // ---------- Fanpage ----------
