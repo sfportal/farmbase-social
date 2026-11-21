@@ -16,6 +16,7 @@ const DEFAULT_SCOPES = [
   'pages_manage_engagement',
   'pages_messaging',
   'ads_read',
+  'read_insights',
 ].join(',');
 
 // FB_GRAPH_BASE chỉ dùng khi chạy thử trên máy (máy chủ Facebook giả), không đặt trên Cloudflare.

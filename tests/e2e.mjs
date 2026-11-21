@@ -76,6 +76,16 @@ const fakeGraph = createServer(async (req, res) => {
   const cv = u.pathname.match(/^\/v[\d.]+\/(\d+)\/conversations$/);
   if (cv) return res.end(JSON.stringify({ data: u.searchParams.get('user_id') === '901' ? [{ id: 't_1', participants: { data: [{ id: '901', name: 'Nguyễn Văn Khách' }, { id: cv[1], name: 'Trang' }] } }] : [] }));
   if (who && (u.searchParams.get('fields') || '').includes('name')) return res.end(JSON.stringify({ id: who[1], name: `Khách ${who[1]}`, profile_pic: `${BASE}/icons/icon.svg` }));
+  // Page Insights: chỉ 2 chỉ số còn dùng được, các chỉ số khác Facebook báo lỗi (giống khi bị bỏ).
+  const pin = u.pathname.match(/^\/v[\d.]+\/(\d+)\/insights$/);
+  if (pin) {
+    const metric = u.searchParams.get('metric');
+    if (!['page_post_engagements', 'page_daily_follows_unique'].includes(metric)) { res.statusCode = 400; return res.end('{"error":{"message":"(#100) The value must be a valid insights metric","code":100}}'); }
+    const since = Number(u.searchParams.get('since')); const until = Number(u.searchParams.get('until'));
+    const values = [];
+    for (let t = since + 86400; t <= until; t += 86400) values.push({ value: metric === 'page_post_engagements' ? 10 : 1, end_time: new Date(t * 1000).toISOString().replace('.000Z', '+0000') });
+    return res.end(JSON.stringify({ data: [{ name: metric, period: 'day', values }] }));
+  }
   const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
   if (!m) { res.statusCode = 404; return res.end('{"error":{"message":"không có","code":100}}'); }
   if (u.searchParams.get('access_token') !== `ma-trang-${m[1]}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
@@ -480,6 +490,33 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   step('hộp thư: webhook có chữ ký, chống trùng, tin nhắn và bình luận, tự nhắn riêng khi khách bình luận, trả lời, khung 24 giờ, đúng quyền');
 }
 
+// 10d. Báo cáo hiệu quả Fanpage
+{
+  let r = await owner.req('/api/report?page_id=111&days=15');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.daily.length, 15);
+  assert.ok(r.data.inbox.messages_in >= 2, 'đếm tin nhắn của khách');
+  assert.equal(r.data.inbox.comments_in, 2, 'đếm bình luận của khách (bỏ bình luận của chính Trang)');
+  assert.ok(r.data.inbox.replies >= 3); assert.ok(r.data.inbox.auto_replies >= 1);
+  assert.equal(r.data.inbox_prev.messages_in, 0);
+  assert.ok(r.data.inbox.median_response_secs !== null, 'tính thời gian trả lời');
+  assert.equal(r.data.daily.reduce((s, x) => s + x.messages_in, 0), r.data.inbox.messages_in);
+  assert.equal(r.data.metrics.page_post_engagements.total, 150); assert.equal(r.data.metrics.page_post_engagements.prev, 150);
+  assert.ok(!r.data.metrics.page_views_total, 'chỉ số lỗi thì bỏ qua');
+  assert.ok(r.data.errors.some((e) => e.source === 'page_views_total'));
+  assert.ok(r.data.posts.posts >= 1);
+  r = await owner.req('/api/report?page_id=111&days=90');
+  assert.equal(r.status, 200); assert.equal(r.data.metrics.page_post_engagements.prev, null);
+  r = await owner.req('/api/report?page_id=111&days=12');
+  assert.equal(r.status, 400);
+  r = await viewer.req('/api/report?page_id=111&days=30');
+  assert.equal(r.status, 404, 'biên tập Trang 222 không xem báo cáo Trang 111');
+  r = await viewer.req('/api/report?page_id=222&days=7');
+  assert.equal(r.status, 200);
+  assert.ok(!graphWrites.some((g) => g.path.includes('insights')));
+  step('báo cáo Fanpage: tin nhắn, bình luận, trả lời, thời gian phản hồi, so với kỳ trước, bài đăng, thống kê Trang, bỏ qua chỉ số lỗi, đúng quyền');
+}
+
 // 10c. Quảng cáo (chỉ đọc)
 {
   let r = await owner.req('/api/ads/accounts');
@@ -542,9 +579,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'quang-cao', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao'].includes(route) ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });

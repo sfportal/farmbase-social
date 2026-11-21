@@ -96,6 +96,7 @@ const I = {
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5 6.5-5s5.7 1.5 6.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.3 0 4 1.2 4.6 3.5"/>',
   log: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 11h7M9 15h7"/>',
   me: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.2-6 8-6s7 2 8 6"/>',
+  report: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   ads: '<path d="M3 10v4l11 5V5z"/><path d="M14 8a4 4 0 0 1 0 8M6 14.5 7.5 20h3l-1.3-4.3"/>',
   rule: '<path d="M5 3h11l3 3v15H5z"/><path d="m8.5 12 2 2 4-4M8.5 17h7"/>',
 };
@@ -110,6 +111,7 @@ function navItems() {
     { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule' },
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
+    { r: 'bao-cao', label: 'Báo cáo', ic: 'report' },
   ];
   if (me.role === 'owner' || me.role === 'manager') items.push({ r: 'quang-cao', label: 'Quảng cáo', ic: 'ads' });
   if (me.role === 'owner') {
@@ -827,6 +829,125 @@ async function viewPosts(q) {
   await loadPosts();
 }
 
+// ---------- Báo cáo hiệu quả Fanpage ----------
+const repState = { page: '', days: 30, group: 'day', metric: 'messages_in' };
+// Chỉ số vẽ biểu đồ: [khóa, nhãn, cách lấy giá trị từ một ngày]
+const REP_SERIES = [
+  ['messages_in', 'Tin nhắn từ khách', (d) => d.messages_in],
+  ['comments_in', 'Bình luận của khách', (d) => d.comments_in],
+  ['new_chats', 'Khách nhắn mới', (d) => d.new_chats],
+  ['replies', 'Trả lời của Trang', (d) => d.replies],
+  ['engagement', 'Tương tác bài đăng', (d) => d.reactions + d.post_comments + d.shares],
+  ['page_post_engagements', 'Tương tác với nội dung', (d) => d.insights.page_post_engagements],
+  ['page_impressions_unique', 'Người tiếp cận', (d) => d.insights.page_impressions_unique],
+  ['page_media_view', 'Lượt xem nội dung', (d) => d.insights.page_media_view],
+  ['page_views_total', 'Lượt xem Trang', (d) => d.insights.page_views_total],
+  ['page_total_actions', 'Lượt nhấp nút liên hệ', (d) => d.insights.page_total_actions],
+  ['page_daily_follows_unique', 'Người theo dõi mới', (d) => d.insights.page_daily_follows_unique],
+];
+const fmtDur = (s) => (s === null || s === undefined ? '–' : s < 60 ? `${s} giây` : s < 3600 ? `${Math.round(s / 60)} phút` : `${(s / 3600).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} giờ`);
+const ddmm = (k) => `${k.slice(8, 10)}/${k.slice(5, 7)}`;
+// So với kỳ trước: mũi tên và phần trăm (chữ màu chữ thường, không dùng màu để báo tốt xấu).
+const delta = (cur, prev) => {
+  if (prev === null || prev === undefined) return '';
+  if (!prev) return cur ? '<span class="delta">kỳ trước 0</span>' : '';
+  const p = Math.round(((cur - prev) / prev) * 100);
+  return `<span class="delta">${p > 0 ? '▲' : p < 0 ? '▼' : '='} ${Math.abs(p)}% so với kỳ trước</span>`;
+};
+
+// Gộp theo tuần (bắt đầu thứ Hai).
+function groupWeeks(daily) {
+  const weeks = [];
+  for (const d of daily) {
+    const dt = new Date(`${d.date}T00:00:00Z`);
+    const mon = new Date(dt.getTime() - ((dt.getUTCDay() + 6) % 7) * 86400000).toISOString().slice(0, 10);
+    let w = weeks[weeks.length - 1];
+    if (!w || w.key !== mon) { w = { key: mon, date: d.date, end: d.date, days: [] }; weeks.push(w); }
+    w.end = d.date; w.days.push(d);
+  }
+  return weeks;
+}
+
+async function viewReport() {
+  layout('bao-cao', 'Báo cáo', 'Hiệu quả tương tác, tin nhắn, bình luận của từng Fanpage theo ngày, theo tuần', '<div class="muted">Đang tải…</div>');
+  const { pages } = await api('/api/pages');
+  const usable = pages.filter((p) => p.status !== 'disconnected');
+  const v = document.getElementById('view');
+  if (!usable.length) { v.innerHTML = '<div class="card"><p class="muted" style="margin:0">Chưa có Fanpage nào để báo cáo.</p></div>'; return; }
+  if (!usable.some((p) => p.id === repState.page)) repState.page = usable[0].id;
+  v.innerHTML = `<div class="card filters f3">
+      <div><label for="rpg">Fanpage</label><select id="rpg">${usable.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></div>
+      <div><label for="rdays">Khoảng thời gian</label><select id="rdays">${[7, 15, 30, 90].map((n) => `<option value="${n}">${n} ngày gần nhất</option>`).join('')}</select></div>
+      <div><label for="rgrp">Xem theo</label><select id="rgrp"><option value="day">Ngày</option><option value="week">Tuần</option></select></div>
+      <div class="end"><button class="btn ghost" id="reload">Tải lại</button></div></div><div id="rep"></div>`;
+  const pg = document.getElementById('rpg'); const dy = document.getElementById('rdays'); const gr = document.getElementById('rgrp');
+  pg.value = repState.page; dy.value = String(repState.days); gr.value = repState.group;
+  let data = null;
+  const load = async () => {
+    const box = document.getElementById('rep');
+    box.innerHTML = '<div class="muted">Đang tổng hợp số liệu…</div>';
+    try { data = await api(`/api/report?page_id=${encodeURIComponent(repState.page)}&days=${repState.days}`, { quiet: true }); } catch (e) { box.innerHTML = `<div class="alert err">${esc(e.message)}</div>`; return; }
+    renderReport(data);
+  };
+  pg.onchange = () => { repState.page = pg.value; load(); };
+  dy.onchange = () => { repState.days = Number(dy.value); load(); };
+  gr.onchange = () => { repState.group = gr.value; if (data) renderReport(data); };
+  document.getElementById('reload').onclick = load;
+  await load();
+}
+
+function renderReport(d) {
+  const box = document.getElementById('rep');
+  const ib = d.inbox; const pv = d.inbox_prev; const m = d.metrics;
+  const has = (k) => m[k] !== undefined;
+  const stat = (label, n, sub) => `<div class="card stat"><div class="muted small">${label}</div><div class="n">${n}</div><div class="muted small">${sub || '&nbsp;'}</div></div>`;
+  const insightCards = ['page_post_engagements', 'page_impressions_unique', 'page_media_view', 'page_views_total', 'page_total_actions', 'page_daily_follows_unique']
+    .filter(has).map((k) => stat(esc(m[k].label), fmtNum(m[k].total), delta(m[k].total, m[k].prev))).join('');
+  const series = REP_SERIES.filter(([k]) => !k.startsWith('page_') || has(k));
+  if (!series.some(([k]) => k === repState.metric)) repState.metric = 'messages_in';
+  const [mk, ml, mf] = series.find(([k]) => k === repState.metric);
+  const periods = repState.group === 'week'
+    ? groupWeeks(d.daily).map((w) => ({ label: `${ddmm(w.date)}–${ddmm(w.end)}`, sum: (f) => w.days.reduce((s, x) => s + (f(x) || 0), 0), days: w.days }))
+    : d.daily.map((x) => ({ label: ddmm(x.date), sum: (f) => f(x) || 0, days: [x] }));
+  const vals = periods.map((p) => p.sum(mf));
+  const max = Math.max(0, ...vals);
+  const chips = series.map(([k, l]) => `<button class="chip ${k === mk ? 'on' : ''}" data-m="${k}">${l}</button>`).join('');
+  const chart = `<div class="card"><h2>${esc(ml)} theo ${repState.group === 'week' ? 'tuần' : 'ngày'}</h2><div class="chips">${chips}</div>
+    <div class="bars ${periods.length > 40 ? 'dense' : ''}" role="img" aria-label="${esc(ml)}, cao nhất ${fmtNum(max)}">${periods.map((p, i) => `<div class="bar" tabindex="0" data-tip="${esc(p.label)}: ${fmtNum(vals[i])}"><span style="height:${max ? Math.max(vals[i] ? 2 : 0, Math.round((vals[i] / max) * 100)) : 0}%"></span></div>`).join('')}</div>
+    <div class="row between muted small" style="flex-wrap:nowrap"><span>${esc(periods[0].label)}</span><span>Cao nhất ${fmtNum(max)}</span><span>${esc(periods[periods.length - 1].label)}</span></div></div>`;
+  const cols = [
+    ['Tin nhắn', (x) => x.messages_in], ['Bình luận', (x) => x.comments_in], ['Khách mới', (x) => x.new_chats + x.new_commenters], ['Trả lời', (x) => x.replies],
+    ['Bài đăng', (x) => x.posts], ['Tương tác bài', (x) => x.reactions + x.post_comments + x.shares],
+    ...['page_post_engagements', 'page_impressions_unique', 'page_media_view', 'page_total_actions', 'page_daily_follows_unique'].filter(has).map((k) => [REP_SERIES.find(([s]) => s === k)[1], (x) => x.insights[k]]),
+  ];
+  const table = `<details class="card" ${window.innerWidth >= 900 ? 'open' : ''}><summary><h2 style="display:inline">Bảng số liệu theo ${repState.group === 'week' ? 'tuần' : 'ngày'}</h2></summary><div class="tscroll"><table class="cards rep"><thead><tr><th>${repState.group === 'week' ? 'Tuần' : 'Ngày'}</th>${cols.map(([l]) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>
+    ${[...periods].reverse().map((p) => `<tr><td><b>${esc(p.label)}</b></td>${cols.map(([l, f]) => `<td data-l="${esc(l)}">${fmtNum(p.sum(f))}</td>`).join('')}</tr>`).join('')}
+    <tr class="total"><td><b>Tổng</b></td>${cols.map(([l, f]) => `<td data-l="${esc(l)}"><b>${fmtNum(d.daily.reduce((s, x) => s + (f(x) || 0), 0))}</b></td>`).join('')}</tr></tbody></table></div></details>`;
+  const insightErr = Object.keys(m).length === 0 && d.errors.some((e) => e.source.startsWith('page_'));
+  const notes = [
+    d.inbox_since ? `Tin nhắn, bình luận được hệ thống ghi nhận từ ${fmtTime(d.inbox_since)} (lúc bật nhận tin tự động); trước đó chưa có số liệu.` : 'Hệ thống chưa ghi nhận tin nhắn, bình luận nào của Fanpage này.',
+    'Tương tác bài đăng là tổng cảm xúc, bình luận, chia sẻ của các bài đăng trong ngày đó (tính đến hiện tại).',
+    insightErr ? 'Chưa lấy được lượt xem, người tiếp cận, người theo dõi mới từ Facebook: Chủ hệ thống cần kết nối lại Fanpage để cấp thêm quyền xem thống kê Trang.' : '',
+    d.errors.some((e) => e.source === 'posts') ? `Chưa lấy được bài đăng: ${esc(d.errors.find((e) => e.source === 'posts').message)}` : '',
+  ].filter(Boolean).map((t) => `<li>${t}</li>`).join('');
+  box.innerHTML = `<p class="muted small" style="margin-top:0">${esc(d.page.name)} · từ ${d.from.split('-').reverse().join('/')} đến ${d.to.split('-').reverse().join('/')}</p>
+    <h2 class="sec">Tin nhắn và bình luận</h2>
+    <div class="grid stats4">
+      ${stat('Tin nhắn từ khách', fmtNum(ib.messages_in), delta(ib.messages_in, pv.messages_in))}
+      ${stat('Bình luận của khách', fmtNum(ib.comments_in), delta(ib.comments_in, pv.comments_in))}
+      ${stat('Khách mới', fmtNum(ib.new_chats + ib.new_commenters), `${fmtNum(ib.new_chats)} nhắn tin, ${fmtNum(ib.new_commenters)} bình luận`)}
+      ${stat('Thời gian trả lời tin nhắn', fmtDur(ib.median_response_secs), `${fmtNum(ib.replies)} lượt trả lời${ib.auto_replies ? `, ${fmtNum(ib.auto_replies)} tự động` : ''}${ib.unanswered ? ` · ${fmtNum(ib.unanswered)} khách chờ` : ''}`)}
+    </div>
+    <h2 class="sec">Nội dung và Trang</h2>
+    <div class="grid stats4">
+      ${d.posts ? stat('Bài đăng', fmtNum(d.posts.posts), `${fmtNum(d.posts.reactions)} cảm xúc, ${fmtNum(d.posts.post_comments)} bình luận, ${fmtNum(d.posts.shares)} chia sẻ`) : ''}
+      ${insightCards}
+    </div>
+    ${chart}${table}<div class="card"><ul class="muted small" style="margin:0;padding-left:18px">${notes}</ul></div>`;
+  box.querySelectorAll('[data-m]').forEach((b) => { b.onclick = () => { repState.metric = b.dataset.m; renderReport(d); }; });
+  box.querySelectorAll('.bar').forEach((b) => { b.onclick = () => toast(b.dataset.tip); });
+}
+
 // ---------- Quảng cáo (chỉ xem) ----------
 const ADS_PRESETS = [['today', 'Hôm nay'], ['yesterday', 'Hôm qua'], ['last_7d', '7 ngày qua'], ['last_30d', '30 ngày qua'], ['this_month', 'Tháng này'], ['last_month', 'Tháng trước'], ['maximum', 'Toàn thời gian']];
 const CAMP_STATUS = {
@@ -1103,7 +1224,7 @@ async function viewAudit() {
 function viewAccount() {
   layout('tai-khoan', 'Tài khoản', esc(`${me.email} · ${me.role_label}`), `
     ${me.role === 'owner' ? '<div class="card only-mobile"><h2>Quản trị</h2><div class="row"><a class="btn ghost" href="#/nhan-vien">Nhân viên</a><a class="btn ghost" href="#/nhat-ky">Nhật ký</a></div></div>' : ''}
-    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a>${me.role === 'owner' || me.role === 'manager' ? '<a class="btn ghost" href="#/quang-cao">Quảng cáo</a>' : ''}</div></div>
+    <div class="card only-mobile"><h2>Mục khác</h2><div class="row"><a class="btn ghost" href="#/bai-dang">Bài đăng</a><a class="btn ghost" href="#/quy-dinh">Quy định đăng bài</a><a class="btn ghost" href="#/bao-cao">Báo cáo</a>${me.role === 'owner' || me.role === 'manager' ? '<a class="btn ghost" href="#/quang-cao">Quảng cáo</a>' : ''}</div></div>
     <div class="card"><h2>Đổi mật khẩu</h2>${passwordForm(false)}</div>
     <div class="card"><h2>Cài lên điện thoại</h2><p class="muted small" style="margin-top:0">
       <b>Android:</b> mở trang này bằng Chrome, bấm menu ⋮ rồi "Cài đặt ứng dụng".<br>
@@ -1132,6 +1253,7 @@ async function render() {
       case 'hop-thu': return await viewInbox(q);
       case 'fanpage': return await viewPages(q);
       case 'bai-dang': return await viewPosts(q);
+      case 'bao-cao': return await viewReport();
       case 'quang-cao': return me.role === 'owner' || me.role === 'manager' ? await viewAds(q) : go('tong-quan');
       case 'lich-dang': return await viewCalendar(q);
       case 'quy-dinh': return await viewRules();
