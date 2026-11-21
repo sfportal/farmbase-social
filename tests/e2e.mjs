@@ -672,6 +672,14 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.link, null);
   assert.ok(r.data.text.endsWith('Nguồn: http://localhost:8791/bai/1'), r.data.text);
+  // Liên hệ và hashtag chuẩn: hệ thống gắn đúng dòng liên hệ, hashtag trong danh sách
+  r = await owner.req('/api/rules', { method: 'PUT', body: { text: 'Biểu tượng cảm xúc: tối đa 3 biểu tượng mỗi bài. Hashtag: 2 đến 4 hashtag, luôn có #FarmBase.', contact: 'Hotline BVI: 0944 374 068 · Website: https://farmbase.vn', hashtags: '#BVI #FarmBase #MaSoVungTrong #DakLak' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await viewer.req('/api/rules');
+  assert.equal(r.data.hashtags, '#BVI #FarmBase #MaSoVungTrong #DakLak');
+  r = await viewer.req('/api/sources/write', { method: 'POST', body: { url: 'http://localhost:8791/bai/1', title: 'Kỹ thuật bón phân', mode: 'rewrite', page_ids: ['222'] } });
+  assert.equal(r.data.text, 'Bài AI viết thử\n\nNguồn: http://localhost:8791/bai/1\nHotline BVI: 0944 374 068 · Website: https://farmbase.vn\n\n#FarmBase #BVI');
+  r = await owner.req('/api/rules', { method: 'PUT', body: { text: 'Gọi khách là Quý khách. Luôn có #FarmBase.', contact: '', hashtags: '' } });
   r = await viewer.req(`/api/sources/${webId}`, { method: 'DELETE', origin: false });
   assert.equal(r.status, 403, 'xóa cần cùng nguồn');
   r = await owner.req('/api/audit');

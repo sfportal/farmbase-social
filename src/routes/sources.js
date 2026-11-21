@@ -6,7 +6,7 @@ import { allowedPageIds } from '../lib/auth.js';
 import { audit } from '../lib/audit.js';
 import { generate, aiProvider, PROVIDER_LABELS } from '../lib/ai.js';
 import { graph } from './facebook.js';
-import { getRules, systemPrompt, tidy, LENGTHS } from './writing.js';
+import { getRules, systemPrompt, tidy, enforceStyle, LENGTHS } from './writing.js';
 
 const UA = 'Mozilla/5.0 (compatible; FarmBaseSocial/1.0; +https://farmbase.vn)';
 const MAX_SOURCES = 50;
@@ -261,15 +261,15 @@ export async function writeFromSource(request, env, user) {
     if (ids.length) pageNames = (await env.DB.prepare(`SELECT name FROM social_pages WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all()).results.map((r) => r.name);
   }
   const length = LENGTHS[body.length] || LENGTHS.vua;
-  const rules = (await getRules(env)).value;
+  const st = await getRules(env);
+  const rules = st.value;
   const prompt = mode === 'share'
     ? `Viết lời giới thiệu ngắn (2 đến 4 câu) để chia sẻ bài dưới đây lên Fanpage, khơi gợi người đọc bấm vào xem. Không chép nguyên văn, không thêm thông tin ngoài nội dung.\n\nTiêu đề: ${title}\nNội dung tóm tắt: ${source}`
     : `Dựa trên bài gốc dưới đây, viết một bài đăng Facebook mới, độ dài ${length}, bằng lời văn của doanh nghiệp. Diễn đạt lại, không chép nguyên câu dài của bài gốc, chỉ dùng thông tin có trong bài gốc.\n\nTiêu đề bài gốc: ${title}\nNội dung bài gốc:\n${source}`;
-  const { text, provider } = await generate(env, { system: systemPrompt(rules, pageNames), prompt, maxTokens: 1200 });
-  let out = tidy(text).slice(0, 4500);
+  const { text, provider } = await generate(env, { system: systemPrompt(rules, pageNames, st), prompt, maxTokens: 1200 });
+  // Bài viết lại từ nguồn ngoài luôn ghi nguồn (quy định nội dung); liên hệ và hashtag theo quy định đăng bài.
+  let out = enforceStyle(tidy(text), { rules, contact: st.contact, hashtags: st.hashtags, source: mode === 'rewrite' ? u.toString() : '' }).slice(0, 4800);
   if (!out) throw new HttpError(502, 'AI chưa trả về nội dung, vui lòng thử lại', 'ai_empty');
-  // Bài viết lại từ nguồn ngoài luôn ghi nguồn (quy định nội dung).
-  if (mode === 'rewrite' && !out.includes(u.toString())) out = `${out.replace(/\n*Nguồn:.*$/i, '')}\n\nNguồn: ${u.toString()}`;
   await audit(env, request, user.id, 'ai_written', `${mode === 'share' ? 'Chia sẻ' : 'Viết lại'}: ${title.slice(0, 70)}`, { url: u.toString() });
   return json({ text: out, link: mode === 'share' ? u.toString() : null, provider: PROVIDER_LABELS[provider] });
 }

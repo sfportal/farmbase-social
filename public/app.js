@@ -727,9 +727,15 @@ async function viewRules() {
     ${d.can_edit ? `<form id="rf" novalidate>
       <label for="rules">Quy định (xưng hô, giọng văn, độ dài, hashtag, từ cấm, thông tin liên hệ…)</label>
       <textarea id="rules" rows="16" maxlength="8000" placeholder="${esc(RULES_SAMPLE)}">${esc(d.text)}</textarea>
-      <div class="muted small" id="rcnt"></div><div id="rmsg"></div>
+      <div class="muted small" id="rcnt"></div>
+      <label for="rcontact">Liên hệ cuối bài (AI luôn gắn đúng dòng này, không tự viết số khác)</label>
+      <input id="rcontact" maxlength="500" placeholder="Ví dụ: Hotline BVI: 0944 374 068 · Website: https://farmbase.vn" value="${esc(d.contact || '')}">
+      <label for="rtags">Hashtag được dùng (AI chỉ chọn trong danh sách này, luôn có #FarmBase)</label>
+      <input id="rtags" maxlength="600" placeholder="#FarmBase #BVI #MaSoVungTrong" value="${esc(d.hashtags || '')}">
+      <div class="muted small">Sau khi AI viết, hệ thống tự bỏ số điện thoại, website, hashtag AI tự đặt ra, giới hạn số biểu tượng cảm xúc theo quy định, rồi gắn dòng liên hệ và 2 đến 4 hashtag ở trên vào cuối bài.</div>
+      <div id="rmsg"></div>
       <div class="actions">${d.text ? '' : '<button type="button" class="btn ghost" id="sample">Dùng mẫu gợi ý</button>'}<button type="submit" class="btn">Lưu quy định</button></div>
-    </form>` : `<div class="rules">${d.text ? esc(d.text) : '<span class="muted">Quản lý chưa soạn quy định.</span>'}</div>`}
+    </form>` : `<div class="rules">${d.text ? esc(d.text) : '<span class="muted">Quản lý chưa soạn quy định.</span>'}</div>${d.contact || d.hashtags ? `<p class="small"><b>Liên hệ cuối bài:</b> ${esc(d.contact || '(chưa có)')}<br><b>Hashtag:</b> ${esc(d.hashtags || '(chưa có)')}</p>` : ''}`}
   </div>`;
   const f = document.getElementById('rf');
   if (!f) return;
@@ -740,7 +746,7 @@ async function viewRules() {
   if (sample) sample.onclick = () => { f.rules.value = RULES_SAMPLE; upd(); f.rules.focus(); };
   f.onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/api/rules', { method: 'PUT', body: { text: f.rules.value } }); toast('Đã lưu quy định'); viewRules(); }
+    try { await api('/api/rules', { method: 'PUT', body: { text: f.rules.value, contact: f.rcontact.value, hashtags: f.rtags.value } }); toast('Đã lưu quy định'); viewRules(); }
     catch (err) { document.getElementById('rmsg').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; }
   };
 }
