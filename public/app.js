@@ -894,11 +894,11 @@ async function viewSources() {
     ? `<div class="muted small">AI đang dùng: <b>${esc(ai_provider)}</b>.</div>`
     : `<div class="muted small">Chưa bật AI.${me.role === 'owner' ? ' Để dùng Claude hoặc DeepSeek, Quý khách thêm biến bí mật ANTHROPIC_API_KEY hoặc DEEPSEEK_API_KEY trong Cloudflare (Worker farmbase-social, Settings, Variables and Secrets).' : ''}</div>`;
   if (!sources.length) {
-    v.innerHTML = `<div class="card"><p style="margin-top:0">Chưa có nguồn nào. Bấm <b>Thêm nguồn</b> để thêm website (ví dụ farmbase.vn, trang tin nông nghiệp) hoặc Fanpage đã kết nối.</p>${aiNote}</div>`;
+    v.innerHTML = `<div class="card"><p style="margin-top:0">Chưa có nguồn nào. Bấm <b>Thêm nguồn</b> để thêm tin tức theo từ khóa (ví dụ sầu riêng), website hoặc Fanpage đã kết nối.</p>${aiNote}</div>`;
   } else {
     if (srcState.id !== 'all' && !sources.some((s) => String(s.id) === String(srcState.id))) srcState.id = sources.length > 1 ? 'all' : sources[0].id;
     v.innerHTML = `<div class="card filters fsrc">
-        <div><label for="ssel">Nguồn</label><select id="ssel">${sources.length > 1 ? `<option value="all">Tất cả nguồn (${sources.length})</option>` : ''}${sources.map((s) => `<option value="${s.id}">${s.kind === 'fanpage' ? 'Fanpage: ' : 'Website: '}${esc(s.name)}</option>`).join('')}</select></div>
+        <div><label for="ssel">Nguồn</label><select id="ssel">${sources.length > 1 ? `<option value="all">Tất cả nguồn (${sources.length})</option>` : ''}${sources.map((s) => `<option value="${s.id}">${{ fanpage: 'Fanpage: ', news: 'Tin tức: ' }[s.kind] || 'Website: '}${esc(s.name)}</option>`).join('')}</select></div>
         <div><label for="stype">Loại</label><select id="stype"><option value="">Tất cả</option><option value="article">Bài viết</option><option value="post">Bài đăng</option><option value="video">Video</option></select></div>
         <div class="kw"><label for="skw">Từ khóa</label><input id="skw" type="search" placeholder="Ví dụ: sầu riêng, truy xuất nguồn gốc" value="${esc(srcState.kw)}"></div>
         <div class="end row"><button class="btn ghost" id="sreload">Tải lại</button>${me.role === 'owner' || me.role === 'manager' ? '<button class="btn ghost danger" id="srm">Bỏ nguồn</button>' : ''}</div></div>
@@ -923,8 +923,11 @@ function openAddSource(pages) {
   modal(`<h2>Thêm nguồn nội dung</h2>
     <form id="sf" novalidate>
       <label>Loại nguồn</label>
-      <div class="pick"><label class="check"><input type="radio" name="kind" value="website" checked> Website</label><label class="check"><input type="radio" name="kind" value="fanpage"> Fanpage đã kết nối</label></div>
-      <div id="sfw"><label for="surl">Địa chỉ website</label><input id="surl" type="url" placeholder="https://farmbase.vn">
+      <div class="pick"><label class="check"><input type="radio" name="kind" value="news" checked> Tin tức theo từ khóa</label><label class="check"><input type="radio" name="kind" value="website"> Website</label><label class="check"><input type="radio" name="kind" value="fanpage"> Fanpage đã kết nối</label></div>
+      <div id="sfn"><label for="skey">Từ khóa</label><input id="skey" maxlength="100" placeholder="Ví dụ: sầu riêng">
+        <label for="ssite">Chỉ lấy từ báo, website (không bắt buộc)</label><input id="ssite" placeholder="Ví dụ: nongnghiepmoitruong.vn">
+        <div class="muted small">Hệ thống tìm tin mới trong ${15} ngày gần nhất trên các báo (qua Bing News), có ảnh và liên kết bài gốc. Bài trên Fanpage của báo thường lấy từ website của báo, nên Quý khách nhập website báo để lấy cùng nội dung.</div></div>
+      <div id="sfw" hidden><label for="surl">Địa chỉ website</label><input id="surl" type="url" placeholder="https://farmbase.vn">
         <div class="muted small">Hệ thống tự tìm RSS hoặc dữ liệu bài viết công khai của website. Có thể dán thẳng địa chỉ RSS.</div></div>
       <div id="sfp" hidden><label for="spg">Fanpage</label>${pages.length ? `<select id="spg">${pages.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>` : '<div class="muted">Chưa có Fanpage nào được kết nối.</div>'}
         <div class="muted small">Facebook chỉ cho đọc bài của Fanpage mà Quý khách quản lý và đã kết nối vào hệ thống.</div></div>
@@ -932,12 +935,13 @@ function openAddSource(pages) {
       <div class="actions"><button type="button" class="btn ghost" data-close>Hủy</button><button type="button" class="btn" id="sfgo">Thêm</button></div>
     </form>`, (m, close) => {
     const f = m.querySelector('#sf');
-    const sw = () => { const fp = f.querySelector('input[name=kind]:checked').value === 'fanpage'; m.querySelector('#sfw').hidden = fp; m.querySelector('#sfp').hidden = !fp; };
+    const sw = () => { const k = f.querySelector('input[name=kind]:checked').value; m.querySelector('#sfw').hidden = k !== 'website'; m.querySelector('#sfp').hidden = k !== 'fanpage'; m.querySelector('#sfn').hidden = k !== 'news'; };
     f.querySelectorAll('input[name=kind]').forEach((r) => (r.onchange = sw));
     m.querySelector('[data-close]').onclick = close;
     m.querySelector('#sfgo').onclick = async (e) => {
       const kind = f.querySelector('input[name=kind]:checked').value;
-      const body = kind === 'website' ? { kind, url: f.surl.value.trim() } : { kind, page_id: f.spg?.value };
+      const body = kind === 'website' ? { kind, url: f.surl.value.trim() } : kind === 'news' ? { kind, keyword: f.skey.value.trim(), site: f.ssite.value.trim() } : { kind, page_id: f.spg?.value };
+      if (kind === 'news' && !body.keyword) { m.querySelector('#sfmsg').innerHTML = '<div class="alert err">Vui lòng nhập từ khóa.</div>'; return; }
       const box = m.querySelector('#sfmsg');
       if (kind === 'website' && !body.url) { box.innerHTML = '<div class="alert err">Vui lòng nhập địa chỉ website.</div>'; return; }
       if (kind === 'fanpage' && !body.page_id) { box.innerHTML = '<div class="alert err">Chưa có Fanpage để chọn.</div>'; return; }
@@ -986,7 +990,7 @@ function renderSourceItems(pages) {
   if (!items.length) { box.innerHTML = `${err}${head}<div class="card"><p class="muted" style="margin:0">${kws.length ? 'Chưa có bài nào khớp từ khóa. Quý khách thử từ khóa khác hoặc chọn "Tất cả nguồn".' : 'Chưa có nội dung phù hợp.'}</p></div>`; return; }
   box.innerHTML = `${err}${head}<div class="srcgrid">${items.map((it, i) => `<article class="srcitem">
       ${it.image ? `<img src="${esc(it.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="noimg"></div>'}
-      <div class="sbody"><div class="muted small"><span class="tag">${SRC_TYPE[it.type] || 'Bài viết'}</span> ${it.date ? fmtTime(it.date) : ''}</div>${many ? `<div class="muted small">${esc(it.src)}</div>` : ''}
+      <div class="sbody"><div class="muted small"><span class="tag">${SRC_TYPE[it.type] || 'Bài viết'}</span> ${it.date ? fmtTime(it.date) : ''}</div>${many || it.publisher ? `<div class="muted small">${esc([it.publisher, many ? it.src : ''].filter(Boolean).join(' · '))}</div>` : ''}
         <h3>${esc(it.title)}</h3><p class="muted small">${esc(it.summary || '')}</p></div>
       <div class="row sact"><button class="btn sm" data-share="${i}">Chia sẻ</button><button class="btn ghost sm" data-rew="${i}">AI viết bài</button><a class="btn ghost sm" href="${esc(it.url)}" target="_blank" rel="noopener">Mở</a></div>
     </article>`).join('')}</div>`;
