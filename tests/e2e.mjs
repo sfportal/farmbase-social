@@ -95,6 +95,14 @@ const fakeGraph = createServer(async (req, res) => {
     for (let t = since + 86400; t <= until; t += 86400) values.push({ value: metric === 'page_post_engagements' ? 10 : 1, end_time: new Date(t * 1000).toISOString().replace('.000Z', '+0000') });
     return res.end(JSON.stringify({ data: [{ name: metric, period: 'day', values }] }));
   }
+  // Website giả có RSS (để thử mục Nguồn nội dung) và video của Trang.
+  if (u.pathname === '/site') { res.setHeader('content-type', 'text/html; charset=utf-8'); return res.end('<html><head><title>Tin Nông Nghiệp Thử</title><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body>Trang chủ</body></html>'); }
+  if (u.pathname === '/feed.xml') { res.setHeader('content-type', 'application/rss+xml'); return res.end(`<?xml version="1.0"?><rss version="2.0"><channel><title>Tin Nông Nghiệp Thử</title>
+    <item><title>Kỹ thuật bón phân sầu riêng mùa mưa</title><link>http://localhost:8791/bai/1</link><pubDate>Thu, 19 Nov 2026 08:00:00 +0700</pubDate><description><![CDATA[<img src="${BASE}/icons/icon.svg"><p>Bà con cần chia nhỏ lượng phân &amp; bón theo tán.</p>]]></description></item>
+    <item><title>Giá cà phê tuần này</title><link>http://localhost:8791/bai/2</link><pubDate>Wed, 18 Nov 2026 08:00:00 +0700</pubDate><description>Giá cà phê tăng nhẹ.</description></item></channel></rss>`); }
+  if (u.pathname.startsWith('/bai/')) { res.setHeader('content-type', 'text/html; charset=utf-8'); return res.end(`<html><body><nav>Menu</nav><article><h1>Kỹ thuật bón phân</h1><p>${'Bà con nên chia phân thành nhiều lần bón trong mùa mưa để cây hấp thu tốt hơn. '.repeat(6)}</p></article></body></html>`); }
+  const vid = u.pathname.match(/^\/v[\d.]+\/(\d+)\/videos$/);
+  if (vid) return res.end(JSON.stringify({ data: [{ id: '5501', title: 'Video thăm vườn', description: 'Thăm vườn sầu riêng vùng 07', created_time: '2026-11-20T02:00:00+0000', permalink_url: `/${vid[1]}/videos/5501/`, picture: `${BASE}/icons/icon.svg` }] }));
   const m = u.pathname.match(/^\/v[\d.]+\/(\d+)\/posts$/);
   if (!m) { res.statusCode = 404; return res.end('{"error":{"message":"không có","code":100}}'); }
   if (u.searchParams.get('access_token') !== `ma-trang-${m[1]}`) { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
@@ -113,7 +121,7 @@ function sql(command) {
 }
 
 // Làm sạch D1 cục bộ và thêm 2 Fanpage giả để thử phân quyền.
-sql("DELETE FROM social_messages; DELETE FROM social_conversations; DELETE FROM social_settings; DELETE FROM social_content; DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
+sql("DELETE FROM social_sources; DELETE FROM social_messages; DELETE FROM social_conversations; DELETE FROM social_settings; DELETE FROM social_content; DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
 const KEY = 'khoa-thu-nghiem-chi-dung-tren-may';
 const encA = await encryptSecret('ma-trang-111', KEY);
 const encB = await encryptSecret('ma-trang-222', KEY);
@@ -590,6 +598,62 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   step('quảng cáo: chưa có quyền thì báo rõ, xem tài khoản, chiến dịch, chi tiêu, kết quả theo khoảng ngày, đúng phân quyền, chỉ đọc');
 }
 
+// 10e. Nguồn nội dung: website (RSS giả) và Fanpage đã kết nối, chia sẻ hoặc AI viết lại
+{
+  const cs = new Client();
+  r = await owner.req('/api/users', { method: 'POST', body: { email: 'cskh2@example.test', role: 'agent', page_ids: ['111'] } });
+  await cs.req('/api/auth/login', { method: 'POST', body: { email: 'cskh2@example.test', password: r.data.temp_password } });
+  await cs.req('/api/auth/change-password', { method: 'POST', body: { current_password: r.data.temp_password, new_password: 'NhanVien2-2026' } });
+  r = await cs.req('/api/sources');
+  assert.equal(r.status, 403, 'CSKH không dùng nguồn nội dung');
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'website', url: 'http://192.168.1.5/feed' } });
+  assert.equal(r.status, 400, 'chặn địa chỉ nội bộ');
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'website', url: 'https://www.facebook.com/trang-khac' } });
+  assert.equal(r.data.code, 'facebook_url');
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'website', url: 'http://localhost:8791/site' } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const webId = r.data.id;
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'website', url: 'http://localhost:8791/site' } });
+  assert.equal(r.status, 409, 'không thêm trùng');
+  r = await viewer.req('/api/sources', { method: 'POST', body: { kind: 'fanpage', page_id: '111' } });
+  assert.equal(r.status, 400, 'biên tập không thêm Trang không được giao');
+  r = await owner.req('/api/sources', { method: 'POST', body: { kind: 'fanpage', page_id: '111' } });
+  assert.equal(r.status, 201);
+  const fpId = r.data.id;
+  r = await owner.req('/api/sources');
+  assert.equal(r.data.sources.length, 2);
+  assert.equal(r.data.sources.find((s) => s.id === webId).name, 'Tin Nông Nghiệp Thử');
+  assert.equal(r.data.ai_provider, 'AI thử nghiệm');
+  r = await viewer.req('/api/sources');
+  assert.deepEqual(r.data.sources.map((s) => s.id), [webId], 'biên tập chỉ thấy website và Trang được giao');
+  r = await viewer.req(`/api/sources/${fpId}/items`);
+  assert.equal(r.status, 404);
+  r = await viewer.req(`/api/sources/${webId}/items`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.items.length, 2);
+  assert.equal(r.data.items[0].title, 'Kỹ thuật bón phân sầu riêng mùa mưa');
+  assert.equal(r.data.items[0].summary, 'Bà con cần chia nhỏ lượng phân & bón theo tán.');
+  assert.ok(r.data.items[0].image.endsWith('/icons/icon.svg'));
+  r = await owner.req(`/api/sources/${fpId}/items`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.items[0].type, 'video');
+  assert.equal(r.data.items[0].url, 'https://www.facebook.com/111/videos/5501/');
+  assert.equal(r.data.items.filter((i) => i.type === 'post').length, 3);
+  r = await viewer.req('/api/sources/write', { method: 'POST', body: { url: 'http://localhost:8791/bai/1', title: 'Kỹ thuật bón phân', summary: 'Tóm tắt', mode: 'share', page_ids: ['222'] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.link, 'http://localhost:8791/bai/1');
+  assert.ok(!r.data.text.includes('Nguồn:'));
+  r = await viewer.req('/api/sources/write', { method: 'POST', body: { url: 'http://localhost:8791/bai/1', title: 'Kỹ thuật bón phân', mode: 'rewrite', length: 'vua', page_ids: ['222'] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.link, null);
+  assert.ok(r.data.text.endsWith('Nguồn: http://localhost:8791/bai/1'), r.data.text);
+  r = await viewer.req(`/api/sources/${webId}`, { method: 'DELETE', origin: false });
+  assert.equal(r.status, 403, 'xóa cần cùng nguồn');
+  r = await owner.req('/api/audit');
+  assert.ok(r.data.entries.some((a) => a.action === 'source_added'), 'ghi nhật ký thêm nguồn');
+  step('nguồn nội dung: thêm website và Fanpage, đọc bài, video, chia sẻ và AI viết lại có ghi nguồn, đúng phân quyền');
+}
+
 // 11. Giao diện trên máy tính và điện thoại
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -609,9 +673,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao'].includes(route) ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
@@ -656,6 +720,16 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   const ovc = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(ovc <= 1, `${label} chi tiết chiến dịch: tràn ngang ${ovc}px`);
   await page.screenshot({ path: `test-output/${label}-chi-tiet-chien-dich.png`, fullPage: true });
+  await page.goto(`${BASE}/#/nguon-noi-dung`);
+  await page.waitForSelector('[data-rew]');
+  await page.click('[data-rew]');
+  await page.waitForSelector('#wgo');
+  await page.check('input[name=wpg]');
+  await page.click('#wgo');
+  await page.waitForSelector('#cf');
+  assert.ok((await page.inputValue('#msg')).includes('Nguồn: http://localhost:8791/bai/1'), 'mở form soạn bài có sẵn nội dung AI');
+  await page.screenshot({ path: `test-output/${label}-nguon-ai-viet.png` });
+  await page.keyboard.press('Escape');
   await page.goto(`${BASE}/#/nhan-vien`);
   await page.waitForSelector('#view table'); // nút Thêm chỉ hoạt động sau khi tải xong danh sách
   await page.click('#add');

@@ -10,7 +10,7 @@
 - Cloudflare Worker `farmbase-social` (`wrangler.jsonc`), mã trong `src/`, giao diện tĩnh trong `public/` (Assets, chế độ SPA). Worker chỉ chạy cho `/api/*`.
 - D1 binding `DB`: **dùng chung D1 `farmbase` của website farmbase.vn** (gói miễn phí giới hạn 10 D1). Mọi bảng phải có tiền tố `social_`, bảng theo dõi migration là `social_migrations`. Không bao giờ đọc, sửa hay xóa bảng không có tiền tố `social_`.
 - Migration trong `migrations/` (đánh số tăng dần, không sửa migration đã chạy).
-- Biến bí mật: `ADMIN_EMAIL`, `ADMIN_INITIAL_PASSWORD`, `TOKEN_KEY`, `FB_APP_SECRET`. Biến thường: `FB_APP_ID`, `FB_API_VERSION`, tùy chọn `FB_SCOPES`, `FB_CONFIG_ID` (cấu hình Facebook Login for Business "Quan ly Fanpage"; có thì gửi config_id thay cho scope).
+- Biến bí mật: `ADMIN_EMAIL`, `ADMIN_INITIAL_PASSWORD`, `TOKEN_KEY`, `FB_APP_SECRET`; tùy chọn `ANTHROPIC_API_KEY` (Claude, ưu tiên) hoặc `DEEPSEEK_API_KEY` cho AI viết bài, không có thì dùng Workers AI (`src/lib/ai.js`, đổi model Claude bằng biến `CLAUDE_MODEL`). Biến thường: `FB_APP_ID`, `FB_API_VERSION`, tùy chọn `FB_SCOPES`, `FB_CONFIG_ID` (cấu hình Facebook Login for Business "Quan ly Fanpage"; có thì gửi config_id thay cho scope).
 - App Meta "FarmBase Social", ID 1683859133415974 (chủ sở hữu: Công ty Cổ phần BVI), đã Publish (chạy thật) ngày 20/11/2026, quyền ở mức cơ bản: chỉ dùng cho Trang mà người có vai trò trong app quản lý; không đăng ký Tech Provider.
 
 ## Quy ước mã

@@ -50,7 +50,11 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | POST | `/api/media?name=` (thân là file ảnh JPG/PNG/GIF/WEBP ≤ 10 MB hoặc video MP4/MOV ≤ 95 MB, lưu R2 `MEDIA`) | Mọi vai trò trừ Chăm sóc khách hàng |
 | GET | `/api/media/file/:key` (công khai, tên ngẫu nhiên, để Facebook tải về) | Công khai |
 | GET, PUT | `/api/rules`: quy định đăng bài (văn phong cho AI) | Xem: mọi người · Sửa: Chủ hệ thống, Quản lý |
-| POST | `/api/ai/write` `{ brief, current?, length?, page_ids? }`: AI viết bài theo quy định (Workers AI `AI`) | Mọi vai trò trừ Chăm sóc khách hàng |
+| POST | `/api/ai/write` `{ brief, current?, length?, page_ids? }`: AI viết bài theo quy định (Claude nếu có `ANTHROPIC_API_KEY`, DeepSeek nếu có `DEEPSEEK_API_KEY`, nếu không dùng Workers AI `AI`) | Mọi vai trò trừ Chăm sóc khách hàng |
+| GET, POST | `/api/sources` `{ kind: website, url }` hoặc `{ kind: fanpage, page_id }`: nguồn nội dung (website tự tìm RSS, Atom, WordPress; Fanpage chỉ là Trang đã kết nối) | Mọi vai trò trừ Chăm sóc khách hàng |
+| GET | `/api/sources/:id/items`: bài viết (website), bài đăng và video (Fanpage) | Như trên |
+| POST | `/api/sources/write` `{ url, title, summary, mode: share\|rewrite, length, page_ids }`: AI viết lời chia sẻ kèm liên kết, hoặc viết lại bài có dòng "Nguồn:" | Như trên |
+| DELETE | `/api/sources/:id`: bỏ nguồn khỏi danh sách | Như trên |
 | GET, POST | `/api/fb/webhook`: Facebook xác minh (verify token suy ra từ `TOKEN_KEY`) và gửi tin nhắn, bình luận mới (kiểm tra chữ ký bằng `FB_APP_SECRET`) | Công khai |
 | GET | `/api/inbox?kind=&page_id=&unread=1&before=`: danh sách cuộc trò chuyện theo Trang được giao | Mọi vai trò |
 | GET | `/api/inbox/:id`: tin trong cuộc trò chuyện, đánh dấu đã đọc | Mọi vai trò |

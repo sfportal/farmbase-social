@@ -11,6 +11,7 @@ import * as writing from './routes/writing.js';
 import * as inbox from './routes/inbox.js';
 import * as ads from './routes/ads.js';
 import * as report from './routes/report.js';
+import * as sources from './routes/sources.js';
 
 // [method, mẫu đường dẫn, hàm, tùy chọn]
 // public: không cần đăng nhập · external: yêu cầu từ máy chủ khác (Facebook), bỏ kiểm tra cùng nguồn vì đã kiểm tra chữ ký · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
@@ -54,6 +55,11 @@ const ROUTES = [
   ['GET', '/api/pages/:id/autoreply', inbox.readAutoReply],
   ['PUT', '/api/pages/:id/autoreply', inbox.saveAutoReply],
   ['GET', '/api/report', report.pageReport],
+  ['GET', '/api/sources', sources.listSources],
+  ['POST', '/api/sources', sources.createSource],
+  ['POST', '/api/sources/write', sources.writeFromSource],
+  ['DELETE', '/api/sources/:id', sources.deleteSource],
+  ['GET', '/api/sources/:id/items', sources.sourceItems],
   ['GET', '/api/ads/accounts', ads.listAdAccounts],
   ['GET', '/api/ads/accounts/:id/campaigns', ads.accountCampaigns],
   ['GET', '/api/ads/campaigns/:id', ads.campaignDetail],

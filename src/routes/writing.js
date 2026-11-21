@@ -1,13 +1,13 @@
 // Quy định đăng bài (văn phong, xưng hô, từ cấm...) và AI viết bài theo quy định (Cloudflare Workers AI).
 import { HttpError, json, readJson, now } from '../lib/http.js';
 import { requireRole, allowedPageIds } from '../lib/auth.js';
+import { generate, PROVIDER_LABELS } from '../lib/ai.js';
 import { audit } from '../lib/audit.js';
 
 const MAX_RULES = 8000;
-const AI_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
-const LENGTHS = { ngan: 'ngắn, khoảng 40 đến 70 từ', vua: 'vừa phải, khoảng 80 đến 150 từ', dai: 'dài, khoảng 180 đến 300 từ' };
+export const LENGTHS = { ngan: 'ngắn, khoảng 40 đến 70 từ', vua: 'vừa phải, khoảng 80 đến 150 từ', dai: 'dài, khoảng 180 đến 300 từ' };
 
-async function getRules(env) {
+export async function getRules(env) {
   const row = await env.DB.prepare("SELECT value, updated_at, updated_by FROM social_settings WHERE key = 'post_rules'").first();
   return row || { value: '', updated_at: null, updated_by: null };
 }
@@ -33,7 +33,7 @@ export async function saveRules(request, env, user) {
   return json({ ok: true, updated_at: t });
 }
 
-function systemPrompt(rules, pageNames) {
+export function systemPrompt(rules, pageNames) {
   return [
     'Bạn là người viết nội dung Fanpage Facebook cho doanh nghiệp Việt Nam.',
     'Viết bằng tiếng Việt có dấu, tự nhiên, đúng chính tả. Chỉ trả về đúng nội dung bài đăng, không giải thích, không tiêu đề kiểu Markdown, không dùng ** hay #.',
@@ -44,7 +44,7 @@ function systemPrompt(rules, pageNames) {
 }
 
 // Bỏ dấu Markdown còn sót, giữ xuống dòng.
-const tidy = (s) => String(s || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/^["“](.*)["”]$/s, '$1').trim();
+export const tidy = (s) => String(s || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/^["“](.*)["”]$/s, '$1').trim();
 
 // POST /api/ai/write { brief, current?, length?, page_ids? }
 export async function aiWrite(request, env, user) {
@@ -69,23 +69,10 @@ export async function aiWrite(request, env, user) {
     ? `Viết lại bài dưới đây cho hay hơn, độ dài ${length}.${brief ? `\nYêu cầu thêm: ${brief}` : ''}\n\nBài hiện tại:\n${current}`
     : `Viết một bài đăng Facebook, độ dài ${length}, từ ý chính sau:\n${brief}`;
 
-  let text;
-  if (env.AI_FAKE_REPLY !== undefined) {
-    text = `${env.AI_FAKE_REPLY}${rules ? ' [theo quy định]' : ''}`; // chỉ dùng khi chạy thử trên máy
-  } else {
-    if (!env.AI) throw new HttpError(503, 'Chưa bật Workers AI cho hệ thống', 'no_ai');
-    try {
-      const out = await env.AI.run(AI_MODEL, {
-        messages: [{ role: 'system', content: systemPrompt(rules, pageNames) }, { role: 'user', content: task }],
-        max_tokens: 900, temperature: 0.7,
-      });
-      text = out?.response;
-    } catch (e) {
-      throw new HttpError(502, 'AI đang bận hoặc hết lượt miễn phí trong ngày, vui lòng thử lại sau', 'ai_error');
-    }
-  }
+  let { text, provider } = await generate(env, { system: systemPrompt(rules, pageNames), prompt: task, maxTokens: 1200 });
+  if (provider === 'fake' && rules) text += ' [theo quy định]'; // chỉ dùng khi chạy thử trên máy
   text = tidy(text).slice(0, 5000);
   if (!text) throw new HttpError(502, 'AI chưa trả về nội dung, vui lòng thử lại', 'ai_empty');
   await audit(env, request, user.id, 'ai_written', brief.slice(0, 80) || '(viết lại)');
-  return json({ text });
+  return json({ text, provider: PROVIDER_LABELS[provider] });
 }

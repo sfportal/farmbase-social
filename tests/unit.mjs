@@ -21,4 +21,16 @@ assert.match(t, /^[A-Za-z2-9]{4}-[A-Za-z2-9]{4}-[A-Za-z2-9]{4}7$/);
 assert.ok(checkPasswordStrength('ngan1'));
 assert.ok(checkPasswordStrength('chichucaidaithoi'));
 assert.equal(checkPasswordStrength('Matkhau2026'), null);
+
+// Nguồn nội dung: đọc RSS, Atom, WordPress; chặn địa chỉ nội bộ
+const { parseFeed, parseWp, safeUrl } = await import('../src/routes/sources.js');
+const atom = parseFeed('<feed><entry><title type="html">Tin &amp; bài</title><link rel="alternate" href="https://a.vn/x"/><updated>2026-11-20T00:00:00Z</updated><summary>Tóm tắt</summary></entry></feed>');
+assert.equal(atom.length, 1);
+assert.equal(atom[0].title, 'Tin & bài');
+assert.equal(atom[0].url, 'https://a.vn/x');
+const wp = parseWp([{ link: 'https://b.vn/y', date_gmt: '2026-11-20T00:00:00', title: { rendered: 'Bài &#8211; WP' }, excerpt: { rendered: '<p>Đoạn đầu</p>' } }]);
+assert.equal(wp[0].url, 'https://b.vn/y');
+assert.equal(wp[0].summary, 'Đoạn đầu');
+for (const bad of ['http://localhost/x', 'http://10.0.0.1/', 'ftp://a.vn', 'http://[::1]/', 'khong-phai-url']) assert.throws(() => safeUrl(bad), bad);
+assert.equal(safeUrl('https://farmbase.vn/blog').hostname, 'farmbase.vn');
 console.log('unit: đạt');
