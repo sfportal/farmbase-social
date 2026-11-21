@@ -46,6 +46,7 @@ const fakeGraph = createServer(async (req, res) => {
   if (ad) {
     if (u.searchParams.get('access_token') !== 'ma-nguoi-dung') { res.statusCode = 400; return res.end('{"error":{"message":"Mã truy cập không hợp lệ","code":190}}'); }
     const p = ad[1];
+    if (p === 'me/adaccounts' && (u.searchParams.get('fields') || '').includes('business')) { res.statusCode = 400; return res.end('{"error":{"message":"(#100) Requires business_management permission to access the field.","code":100}}'); }
     if (p === 'me/adaccounts') return res.end(JSON.stringify({ data: [{ id: 'act_555', account_id: '555', name: 'QC FarmBase', currency: 'VND', account_status: 1, amount_spent: '1500000' }] }));
     if (p === 'act_555') return res.end(JSON.stringify({ id: 'act_555', account_id: '555', name: 'QC FarmBase', currency: 'VND', account_status: 1 }));
     if (p === 'act_555/campaigns') return res.end(JSON.stringify({ data: [

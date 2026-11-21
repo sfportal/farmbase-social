@@ -97,7 +97,7 @@ export async function listAdAccounts(request, env, user) {
   const { token, expires_at } = await userToken(env);
   let rows;
   try {
-    rows = await allPages(env, 'me/adaccounts', { access_token: token, fields: 'account_id,name,currency,account_status,timezone_name,amount_spent,business{name}', limit: '100' });
+    rows = await allPages(env, 'me/adaccounts', { access_token: token, fields: 'account_id,name,currency,account_status,timezone_name,amount_spent', limit: '100' });
   } catch (e) { throw adsError(e); }
   const accounts = rows.map((a) => ({
     id: String(a.account_id || a.id).replace(/^act_/, ''),
@@ -105,7 +105,6 @@ export async function listAdAccounts(request, env, user) {
     currency: a.currency || 'VND',
     status: ACCOUNT_STATUS[a.account_status] || 'other',
     timezone: a.timezone_name || null,
-    business: a.business?.name || null,
     amount_spent: toMoney(a.amount_spent, a.currency),
     link: `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${encodeURIComponent(String(a.account_id || a.id).replace(/^act_/, ''))}`,
   }));

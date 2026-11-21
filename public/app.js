@@ -858,7 +858,7 @@ async function viewAds() {
   if (!d.accounts.some((a) => a.id === adsState.account)) adsState.account = (d.accounts.find((a) => a.status === 'active') || d.accounts[0]).id;
   v.innerHTML = `
     <div class="card filters">
-      <div><label for="acc">Tài khoản quảng cáo</label><select id="acc">${d.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}${a.business ? ` (${esc(a.business)})` : ''}</option>`).join('')}</select></div>
+      <div><label for="acc">Tài khoản quảng cáo</label><select id="acc">${d.accounts.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></div>
       <div><label for="pre">Thời gian</label><select id="pre">${ADS_PRESETS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
       <div class="end"><button class="btn ghost" id="reload">Tải lại</button></div>
     </div>
