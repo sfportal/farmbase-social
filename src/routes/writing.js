@@ -59,7 +59,9 @@ export function enforceStyle(text, { rules = '', contact = '', hashtags = '', so
   const modelTags = parseTags(text);
   const contactWords = /(hotline|liên hệ|điện thoại|zalo|website|trang web|truy cập|inbox|nhắn tin)/i;
   const hasLink = /(https?:\/\/|www\.|\b[a-z0-9-]+\.(?:vn|com|net)\b)/i;
-  let body = String(text || '').replace(/^\s*Nguồn:.*$/gim, '').split('\n').map((line) => {
+  // Hashtag AI viết sai dạng ("# DakLak" bị bỏ dấu # còn "DakLak"): bỏ dòng chỉ gồm từ ghép kiểu CamelCase.
+  const tagLine = /^\s*(?:#?\s*[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+[\s,]*)+$/;
+  let body = String(text || '').replace(/^\s*Nguồn:.*$/gim, '').split('\n').filter((l) => !tagLine.test(l)).map((line) => {
     let l = line.replace(TAG, '').replace(/[ \t]+$/g, '');
     const sentences = l.split(/(?<=[.!?…])\s+/);
     const keep = sentences.filter((s) => {

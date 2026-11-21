@@ -52,4 +52,5 @@ const { shortParagraphs } = await import('../src/routes/writing.js');
 const longP = 'Câu một khá dài về kỹ thuật chăm sóc vườn sầu riêng sau thu hoạch cho bà con. Câu hai nói về lịch bón phân hợp lý trong mùa mưa. Câu ba mời bà con đăng ký tham gia buổi tập huấn sắp tới.';
 assert.equal(shortParagraphs(longP), 'Câu một khá dài về kỹ thuật chăm sóc vườn sầu riêng sau thu hoạch cho bà con. Câu hai nói về lịch bón phân hợp lý trong mùa mưa.\n\nCâu ba mời bà con đăng ký tham gia buổi tập huấn sắp tới.');
 assert.equal(shortParagraphs('Mở đầu.\n- Ý một\n- Ý hai\nKết.'), 'Mở đầu.\n\n- Ý một\n- Ý hai\n\nKết.');
+assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }), 'Chào bà con.', 'bỏ dòng hashtag thiếu dấu #');
 console.log('unit: đạt');
