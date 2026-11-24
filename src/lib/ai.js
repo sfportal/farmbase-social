@@ -80,7 +80,9 @@ export async function generate(env, { system, prompt, maxTokens = 1200, tier = '
       return { text: d.choices?.[0]?.message?.content || '', provider };
     }
     const out = await env.AI.run(WORKERS_MODEL, { messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], max_tokens: maxTokens, temperature: 0.7 });
-    return { text: out?.response || '', provider };
+    // Workers AI có lúc trả sẵn đối tượng JSON thay vì chuỗi.
+    const resp = out?.response;
+    return { text: resp && typeof resp === 'object' ? JSON.stringify(resp) : resp || '', provider };
   } catch (e) {
     console.error('ai', provider, e?.message);
     const msg = provider === 'workers' ? 'AI đang bận hoặc hết lượt miễn phí trong ngày, vui lòng thử lại sau' : `${PROVIDER_LABELS[provider]} báo lỗi: ${String(e?.message || '').slice(0, 200)}`;
