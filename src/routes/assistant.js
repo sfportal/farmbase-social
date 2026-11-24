@@ -278,8 +278,15 @@ Prompt có thể chọn (theo chủ đề): ${[...new Set(slots.flatMap((s) => (
 Trả JSON {"posts":[{"topic_id":0,"hook":"câu móc","message":"thân bài hoàn chỉnh (gồm hook ở đầu, không gồm liên hệ và hashtag)","visual":"hình ảnh hoặc video cần thiết kế: kích thước, bố cục, chữ trên ảnh","prompt_id":"mã prompt","storyboard":"nếu là video: 4–6 dòng 'giây | hình | chữ trên màn hình | lời đọc', không phải video thì để trống","reason":"vì sao nên đăng bài này hôm đó (1–2 câu)","source":"link nguồn nếu dùng tin tức, không thì để trống"${cfg.website ? ',"website":{"title":"tiêu đề bài website dưới 60 ký tự","outline":"dàn ý 3–5 ý"}' : ''}}]}`;
   const { text, provider } = await generate(env, { tier: 'write', maxTokens: 6000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
   const out = parseJson(text);
-  const posts = Array.isArray(out?.posts) ? out.posts : [];
-  if (!posts.length) throw new HttpError(502, 'AI chưa trả về bài hợp lệ, vui lòng thử lại', 'ai_bad');
+  let posts = Array.isArray(out?.posts) ? out.posts : Array.isArray(out) ? out : out?.message ? [out] : [];
+  // AI trả JSON bị cắt hoặc chỉ trả văn bản: vẫn lấy được thân bài cho chỗ đầu tiên.
+  if (!posts.length) {
+    const m = String(text).match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)/);
+    const msg = m ? m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') : (!/^\s*[{[]/.test(text) ? text : '');
+    if (msg.trim().length > 80) posts = [{ topic_id: slots[0].topic_id, message: msg, reason: slots[0].why || 'Bám kế hoạch tuần' }];
+  }
+  if (!posts.length) console.error('assistant draft: AI trả về không đọc được', String(text).slice(0, 500));
+  if (!posts.length) throw new HttpError(502, `AI chưa trả về bài hợp lệ, vui lòng thử lại (AI trả: ${cut(text, 160) || 'rỗng'})`, 'ai_bad');
   const created = [];
   const t = now();
   for (let i = 0; i < Math.min(posts.length, slots.length); i++) {
