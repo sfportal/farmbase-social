@@ -104,14 +104,14 @@ const fakeGraph = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
     if (u.searchParams.get('key') !== 'khoa-thu') { res.statusCode = 403; return res.end(JSON.stringify({ error: { errors: [{ reason: 'forbidden' }] } })); }
     const q = u.searchParams.get('q');
-    const ids = q === 'mã số vùng trồng' ? ['vid_clip1', 'vid_short1'] : q === 'FarmBase' ? ['vid_short1', 'vid_clip2'] : [];
+    const ids = q === 'mã số vùng trồng' ? ['vid_clip1', 'vid_short1'] : q === 'FarmBase' ? ['vid_short1', 'vid_clip2', 'vid_en1'] : [];
     return res.end(JSON.stringify({ items: ids.map((id) => ({ id: { kind: 'youtube#video', videoId: id } })) }));
   }
   if (u.pathname === '/youtube/v3/videos') {
     res.setHeader('content-type', 'application/json');
-    const D = { vid_clip1: ['PT4M13S', 'Quy trình xin mã số vùng trồng', 1200], vid_short1: ['PT45S', 'Mã số vùng trồng là gì?', 3400], vid_clip2: ['PT1H2M', 'Hội thảo truy xuất nguồn gốc', 90] };
+    const D = { vid_clip1: ['PT4M13S', 'Quy trình xin mã số vùng trồng', 1200], vid_short1: ['PT45S', 'Mã số vùng trồng là gì?', 3400], vid_clip2: ['PT1H2M', 'Hội thảo truy xuất nguồn gốc', 90], vid_en1: ['PT5M', 'Smart farm tour in Thailand', 50] };
     const items = u.searchParams.get('id').split(',').filter((id) => D[id]).map((id) => ({ id, contentDetails: { duration: D[id][0] }, statistics: { viewCount: String(D[id][2]), likeCount: '5' },
-      snippet: { title: D[id][1], channelTitle: 'Kênh Thử', channelId: 'UC1', description: 'Mô tả video thử', publishedAt: new Date(Date.now() - 86400000).toISOString(), thumbnails: { medium: { url: `${BASE}/icons/icon.svg` } } } }));
+      snippet: { title: D[id][1], channelTitle: 'Kênh Thử', channelId: 'UC1', description: id === 'vid_en1' ? 'English only video' : 'Mô tả video thử', publishedAt: new Date(Date.now() - 86400000).toISOString(), thumbnails: { medium: { url: `${BASE}/icons/icon.svg` } } } }));
     return res.end(JSON.stringify({ items }));
   }
   if (u.pathname === '/news/search') {
@@ -1000,6 +1000,7 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.total, 3, r.data.log.join('\n'));
   assert.equal(r.data.ideas, 3);
+  assert.ok(r.data.log.includes('Bỏ qua 1 video không phải tiếng Việt'), r.data.log.join('\n'));
   r = await owner.req('/api/videos/fetch', { method: 'POST' });
   assert.equal(r.data.total, 0, 'không lưu trùng');
   r = await viewer.req('/api/videos?kind=short');
