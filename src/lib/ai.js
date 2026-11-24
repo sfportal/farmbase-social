@@ -93,7 +93,7 @@ export function parseJson(text) {
   const s = String(text || '').replace(/```(?:json)?/gi, '').trim();
   const a = s.indexOf('{'), b = s.lastIndexOf('}');
   const a2 = s.indexOf('['), b2 = s.lastIndexOf(']');
-  const tryParse = (x) => { try { return JSON.parse(x); } catch { return null; } };
+  const tryParse = (x) => { try { return JSON.parse(x); } catch { try { return JSON.parse(repairJson(x)); } catch { return null; } } };
   if (a2 !== -1 && (a === -1 || a2 < a)) { const v = tryParse(s.slice(a2, b2 + 1)); if (v) return v; }
   if (a !== -1) return tryParse(s.slice(a, b + 1));
   return null;
@@ -114,4 +114,21 @@ function fakeJson(prompt) {
   if (kind === 'suggest') return JSON.stringify({ suggestions: [{ action: 'new', parent_id: ids[0] || null, title: 'Chủ đề con đề xuất thử', hook: 'Câu móc đề xuất', message: 'Thông điệp đề xuất', cta: 'Nhắn tin cho Fanpage', reason: 'Từ tin tức mới trong kho' }] });
   if (kind === 'summary') return JSON.stringify({ digest: 'Tóm tắt tài liệu thử' });
   return '{}';
+}
+
+// Sửa JSON AI viết sai thường gặp: xuống dòng, tab nằm trong chuỗi; dấu phẩy thừa trước } hoặc ].
+export function repairJson(x) {
+  let out = '', inStr = false, esc = false;
+  for (const ch of String(x)) {
+    if (inStr) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === '\\') { out += ch; esc = true; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') continue;
+      if (ch === '\t') { out += ' '; continue; }
+      out += ch;
+    } else { if (ch === '"') inStr = true; out += ch; }
+  }
+  return out.replace(/,\s*([}\]])/g, '$1');
 }

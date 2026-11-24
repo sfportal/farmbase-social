@@ -73,6 +73,7 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
   assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
   assert.deepEqual(parseJson('Đây là kết quả: {"posts":[{"x":"y"}]} xong'), { posts: [{ x: 'y' }] });
   assert.equal(parseJson('không có'), null);
+  assert.deepEqual(parseJson('{"posts":[{"message":"Dòng 1\nDòng 2\tx",}]}'), { posts: [{ message: 'Dòng 1\nDòng 2 x' }] }, 'sửa xuống dòng trong chuỗi và dấu phẩy thừa');
   assert.equal(templateFor('Chiến dịch 10000ha'), '10000ha');
   assert.equal(templateFor('Chiến dịch 10.000 ha'), '10000ha');
   assert.equal(templateFor('FarmBase'), 'farmbase');
