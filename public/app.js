@@ -432,7 +432,7 @@ const PLAT = { youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram',
 const fmtLen = (s) => (s === null || s === undefined ? '' : s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
 
 async function viewVideos() {
-  layout('video-tham-khao', 'Video tham khảo', 'Video YouTube mới về FarmBase, mã vùng trồng, truy xuất, bán hàng online; AI rút ý tưởng để học hỏi', '<div class="muted">Đang tải…</div>', '');
+  layout('video-tham-khao', 'Video tham khảo', 'Video YouTube mới về FarmBase, mã vùng trồng, truy xuất, bán hàng online để học hỏi ý tưởng', '<div class="muted">Đang tải…</div>', '');
   const qs = new URLSearchParams({ kind: vidState.kind, sort: vidState.sort, days: String(vidState.days) });
   if (vidState.keyword) qs.set('keyword', vidState.keyword);
   if (vidState.starred) qs.set('starred', '1');
@@ -460,12 +460,12 @@ async function viewVideos() {
     <div class="card"><h2>Dán link video của đối thủ hoặc video hay</h2>
       <div class="cmpform"><div class="grow"><label for="vurl">Link (Facebook Reels, Instagram Reels, TikTok, YouTube)</label><input id="vurl" type="url" placeholder="https://www.tiktok.com/@…/video/… hoặc https://www.facebook.com/reel/…"></div>
         <div><label for="vvc">Đối thủ (không bắt buộc)</label><select id="vvc"><option value="">Không gắn</option>${d.competitors.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div></div>
-      <label for="vnote">Ghi chú hoặc nội dung video (để AI rút ý tưởng)</label><textarea id="vnote" rows="2" maxlength="3000" placeholder="Ví dụ: Reels 20 giây, mở bằng cảnh vườn, chữ to 'Mã vùng trồng là gì?'…"></textarea>
+      <label for="vnote">Ghi chú (không bắt buộc)</label><textarea id="vnote" rows="2" maxlength="3000" placeholder="Ví dụ: Reels 20 giây, mở bằng cảnh vườn, chữ to 'Mã vùng trồng là gì?'…"></textarea>
       <div class="row"><span class="muted small grow">Reels và TikTok chưa có API mở nên lưu bằng cách dán link. YouTube tự lấy thêm tiêu đề, lượt xem.</span><button class="btn sm" id="vadd">Lưu video</button></div><div id="vmsg"></div></div>
     ${cards ? `<div class="vgrid ${vidState.kind}">${cards}</div>` : `<div class="card muted">Chưa có video nào${d.has_key ? '. Bấm "Cập nhật ngay" hoặc chờ lượt tự lấy lúc 5h15 sáng.' : '.'}</div>`}
     <div class="card"><h2>Từ khóa tìm video</h2>
       ${d.can_edit ? `<textarea id="vkws" rows="3" maxlength="1200">${esc(d.keywords.join(', '))}</textarea><div class="row"><span class="muted small grow">Tối đa 12 từ khóa, cách nhau bằng dấu phẩy.</span><button class="btn sm" id="vkwsave">Lưu từ khóa</button></div>` : `<div>${d.keywords.map(esc).join(' · ')}</div>`}
-      <div class="muted small">Mỗi sáng 5h15 hệ thống tìm video YouTube đăng trong 14 ngày gần nhất theo các từ khóa này và theo tên từng đối thủ đang theo dõi, tách Shorts (dưới 3 phút) và clip, AI rút ý tưởng. Lần chạy gần nhất: ${lr ? `${fmtTime(lr.at)}, ${lr.added} video mới` : 'chưa chạy'}. TikTok và Reels chưa có API mở nên chưa tự lấy.</div>
+      <div class="muted small">Mỗi sáng 5h15 hệ thống tìm video YouTube đăng trong 14 ngày gần nhất theo các từ khóa này và theo tên từng đối thủ đang theo dõi, tách Shorts (dưới 3 phút) và clip. Không dùng AI nên không phát sinh phí. Lần chạy gần nhất: ${lr ? `${fmtTime(lr.at)}, ${lr.added} video mới` : 'chưa chạy'}. TikTok và Reels chưa có API mở nên chưa tự lấy.</div>
       ${lr?.log?.length ? `<details><summary class="small">Nhật ký lần chạy</summary>${lr.log.map((l) => `<div class="small">• ${esc(l)}</div>`).join('')}</details>` : ''}</div>`;
   v.querySelector('#vcomp').value = vidState.comp;
   v.querySelector('#vcomp').onchange = (e) => { vidState.comp = e.target.value; viewVideos(); };
@@ -475,7 +475,7 @@ async function viewVideos() {
     e.target.disabled = true; msg.innerHTML = '<div class="muted small">Đang lưu…</div>';
     try {
       const r = await api('/api/videos', { method: 'POST', body: { url, competitor_id: v.querySelector('#vvc').value || null, note: v.querySelector('#vnote').value } });
-      toast(r.updated ? 'Video này đã có, đã cập nhật' : `Đã lưu video${r.ai ? ', AI đã rút ý tưởng' : ''}`);
+      toast(r.updated ? 'Video này đã có, đã cập nhật' : 'Đã lưu video');
       if (!r.updated && r.kind) vidState.kind = r.kind;
       viewVideos();
     } catch (err) { msg.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }

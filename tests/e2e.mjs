@@ -1042,13 +1042,13 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req('/api/videos/fetch', { method: 'POST' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.total, 3, r.data.log.join('\n'));
-  assert.equal(r.data.ideas, 3);
+  assert.equal(r.data.ideas, 0, 'không dùng AI cho video');
   assert.ok(r.data.log.includes('Bỏ qua 1 video không phải tiếng Việt'), r.data.log.join('\n'));
   r = await owner.req('/api/videos/fetch', { method: 'POST' });
   assert.equal(r.data.total, 0, 'không lưu trùng');
   r = await viewer.req('/api/videos?kind=short');
   assert.deepEqual(r.data.items.map((v) => v.url), ['https://www.youtube.com/shorts/vid_short1']);
-  assert.ok(r.data.items[0].idea && r.data.items[0].views === 3400);
+  assert.ok(!r.data.items[0].idea && r.data.items[0].views === 3400);
   r = await viewer.req('/api/videos?kind=clip&sort=views');
   assert.deepEqual(r.data.items.map((v) => v.video_id), ['vid_clip1', 'vid_clip2']);
   r = await viewer.req(`/api/videos/${r.data.items[0].id}`, { method: 'PATCH', body: { starred: true } });
@@ -1056,7 +1056,7 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await viewer.req('/api/videos?starred=1');
   assert.equal(r.data.items.length, 1);
   r = await viewer.req('/api/videos', { method: 'POST', body: { url: 'https://www.tiktok.com/@doithu/video/7312345678901234567?lang=vi', competitor_id: cid, note: 'TikTok 20 giây hỏi đáp mã vùng trồng' } });
-  assert.equal(r.status, 201, JSON.stringify(r.data)); assert.equal(r.data.kind, 'reel'); assert.equal(r.data.ai, true);
+  assert.equal(r.status, 201, JSON.stringify(r.data)); assert.equal(r.data.kind, 'reel'); assert.equal(r.data.ai, false);
   r = await viewer.req('/api/videos', { method: 'POST', body: { url: 'https://www.tiktok.com/@doithu/video/7312345678901234567' } });
   assert.equal(r.data.updated, true, 'không lưu trùng');
   r = await viewer.req('/api/videos', { method: 'POST', body: { url: 'https://example.com/video' } });
