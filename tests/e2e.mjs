@@ -922,6 +922,60 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   step('kho ảnh, video theo Fanpage, chọn model Claude, tương tác 7/15/30 ngày, cân chỉnh tỷ trọng, thay bộ mẫu');
 }
 
+// Theo dõi đối thủ: danh sách ban đầu, link Ad Library, dán link, AI phân tích, tự lấy website và tin báo, tổng hợp, đúng quyền
+{
+  r = await owner.req('/api/competitors');
+  assert.equal(r.status, 200);
+  assert.equal(r.data.competitors.length, 11, 'có sẵn 11 đối thủ');
+  const base = r.data.competitors.find((c) => c.name.startsWith('Base EUDR'));
+  assert.ok(base.ad_library_url.includes('view_all_page_id=61596268044776') && base.ad_library_url.includes('country=VN'));
+  const qc = r.data.competitors.find((c) => c.name === 'Qcert');
+  assert.ok(qc.ad_library_url.includes('q=Qcert'), 'chưa có mã Trang thì tìm theo từ khóa');
+  assert.ok(r.data.items.some((i) => i.url === 'https://www.facebook.com/ads/library/?id=1131153172655563'), 'có quảng cáo ghi nhận 24/11');
+  r = await viewer.req('/api/competitors', { method: 'POST', body: { name: 'Đối thủ thử' } });
+  assert.equal(r.status, 403, 'biên tập không thêm đối thủ');
+  r = await owner.req('/api/competitors', { method: 'POST', body: { name: 'Đối thủ thử', kind: 'Phần mềm', fb_url: 'https://www.facebook.com/profile.php?id=100012345678', website: 'http://localhost:8791/site', keywords: 'Đối thủ thử' } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const cid = r.data.id;
+  // Biên tập dán link mẫu quảng cáo kèm nội dung: AI phân tích; dán lại không trùng
+  r = await viewer.req(`/api/competitors/${cid}/items`, { method: 'POST', body: { url: 'https://www.facebook.com/ads/library/?id=987654321012&utm_source=x', text: 'Đăng ký ngay để được tư vấn hồ sơ mã vùng trồng miễn phí trước vụ sầu riêng.', started: '2026-11-20' } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.equal(r.data.kind, 'ad'); assert.equal(r.data.ai, true);
+  r = await viewer.req(`/api/competitors/${cid}/items`, { method: 'POST', body: { url: 'https://m.facebook.com/ads/library/?id=987654321012' } });
+  assert.equal(r.data.updated, true, 'không lưu trùng');
+  r = await viewer.req(`/api/competitors/${cid}/items`, { method: 'POST', body: { url: 'https://www.facebook.com/ads/library/?q=abc' } });
+  assert.equal(r.status, 400, 'link Ad Library thiếu mã mẫu quảng cáo');
+  r = await viewer.req(`/api/competitors/${cid}/items`, { method: 'POST', body: { url: 'https://www.facebook.com/doithu/posts/pfbid0abc?__cft__=x' } });
+  assert.equal(r.data.kind, 'post');
+  // Tự lấy: bài website (RSS) và tin báo nhắc tên đối thủ
+  r = await viewer.req('/api/competitors/fetch', { method: 'POST', body: { competitor_id: cid } });
+  assert.equal(r.status, 403);
+  r = await owner.req('/api/competitors/fetch', { method: 'POST', body: { competitor_id: cid } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.total, 4, r.data.log.join('\n'));
+  r = await owner.req('/api/competitors/fetch', { method: 'POST', body: { competitor_id: cid } });
+  assert.equal(r.data.total, 0, 'lần sau không thêm trùng');
+  r = await viewer.req(`/api/competitors?competitor_id=${cid}`);
+  const its = r.data.items;
+  assert.deepEqual([...new Set(its.map((i) => i.kind))].sort(), ['ad', 'article', 'news', 'post']);
+  const ad = its.find((i) => i.kind === 'ad');
+  assert.equal(ad.url, 'https://www.facebook.com/ads/library/?id=987654321012');
+  assert.ok(ad.angle.length > 5, 'AI rút góc tiếp cận');
+  assert.ok(its.filter((i) => i.kind === 'article').every((i) => i.url.startsWith('http://localhost:8791/bai/')));
+  assert.equal(r.data.competitors.find((c) => c.id === cid).ad_library_url.includes('view_all_page_id=100012345678'), true);
+  r = await owner.req('/api/competitors/analyze', { method: 'POST', body: { days: 7 } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.report.summary && r.data.report.ideas.length);
+  r = await viewer.req(`/api/competitors/items/${ad.id}`, { method: 'DELETE' });
+  assert.equal(r.status, 403);
+  r = await owner.req(`/api/competitors/${cid}`, { method: 'PATCH', body: { active: false } });
+  assert.equal(r.status, 200);
+  r = await owner.req('/api/competitors');
+  assert.equal(r.data.competitors.find((c) => c.id === cid).active, false);
+  assert.ok(r.data.report, 'lưu bản tổng hợp');
+  step('theo dõi đối thủ: 11 đối thủ có sẵn, link Ad Library, dán link không trùng, AI phân tích, tự lấy website và tin báo, tổng hợp, đúng quyền');
+}
+
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 mkdirSync('test-output', { recursive: true });
@@ -943,9 +997,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly', 'kho-media', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'doi-thu', 'chu-de', 'tro-ly', 'kho-media', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly', 'kho-media'].includes(route) ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung', 'doi-thu', 'chu-de', 'tro-ly', 'kho-media'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });

@@ -450,3 +450,15 @@ details.pfb textarea { margin: 6px 0; }
 .badge.opt { background: var(--forest); color: #fff; }
 .badge.share { background: #f2b705; color: #3a2a00; }
 .adraft.isshare { border-left: 4px solid #f2b705; }
+
+/* Theo dõi đối thủ */
+.cmpstat { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cmpstat .card { margin: 0; }
+.cmpstat .stat { display: flex; flex-direction: column; gap: 2px; }
+.cmpstat .stat .n { font-size: 26px; font-weight: 700; }
+.cmpform { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.cmpform > div { min-width: 0; }
+.cmpform .grow { flex: 1 1 260px; }
+.cmpitem .ctitle { font-weight: 600; margin: 4px 0 2px; overflow-wrap: anywhere; }
+.cmpitem .small { overflow-wrap: anywhere; }
+@media (max-width: 599px) { .cmpform > div { flex: 1 1 100%; } .cmpform select { width: 100%; } }

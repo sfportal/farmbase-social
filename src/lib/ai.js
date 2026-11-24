@@ -156,6 +156,8 @@ function fakeJson(prompt) {
   if (kind === 'suggest') return JSON.stringify({ suggestions: [{ action: 'new', parent_id: ids[0] || null, title: 'Chủ đề con đề xuất thử', hook: 'Câu móc đề xuất', message: 'Thông điệp đề xuất', cta: 'Nhắn tin cho Fanpage', reason: 'Từ tin tức mới trong kho' }] });
   if (kind === 'prompts') return JSON.stringify({ prompts: [{ name: 'Tem QR bật thẻ hành trình vườn', kind: 'video', text: 'Video 9:16, 10 giây: tay cầm điện thoại quét tem QR trên trái sầu riêng, thẻ hành trình vườn trượt lên theo hiệu ứng parallax, chữ [NỘI DUNG], màu xanh #084C46', keywords: 'parallax, mockup điện thoại', why: 'Dùng cho chủ đề truy xuất nguồn gốc' }] });
   if (kind === 'summary') return JSON.stringify({ digest: 'Tóm tắt tài liệu thử' });
+  if (kind === 'cmp_item') return JSON.stringify({ title: 'Quảng cáo thử của đối thủ', fmt: 'Ảnh, bài dài', angle: 'Đánh vào nỗi lo mất mã vùng trồng', cta: 'Nhắn tin' });
+  if (kind === 'cmp_report') return JSON.stringify({ summary: 'Tuần này đối thủ tập trung quảng cáo mã vùng trồng.', themes: ['Mã vùng trồng'], offers: ['Tư vấn miễn phí'], ideas: ['Bài hỏi đáp về hồ sơ mã vùng trồng cho bà con'] });
   return '{}';
 }
 

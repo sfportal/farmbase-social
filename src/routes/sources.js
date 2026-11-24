@@ -107,7 +107,7 @@ export function parseWp(list) {
 }
 
 // Tìm nguồn đọc được của một website: thẻ RSS/Atom trong trang, đường dẫn feed phổ biến, hoặc WordPress REST.
-async function discover(u) {
+export async function discover(u) {
   const tried = [];
   const tryFeed = async (url) => {
     tried.push(url);

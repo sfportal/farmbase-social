@@ -16,6 +16,7 @@ import * as sources from './routes/sources.js';
 import * as overviewR from './routes/overview.js';
 import * as topics from './routes/topics.js';
 import * as assistant from './routes/assistant.js';
+import * as competitors from './routes/competitors.js';
 
 // [method, mẫu đường dẫn, hàm, tùy chọn]
 // public: không cần đăng nhập · external: yêu cầu từ máy chủ khác (Facebook), bỏ kiểm tra cùng nguồn vì đã kiểm tra chữ ký · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
@@ -94,6 +95,14 @@ const ROUTES = [
   ['POST', '/api/assistant/run', assistant.runNow],
   ['POST', '/api/assistant/plan-feedback', assistant.planFeedback],
   ['POST', '/api/assistant/revise/:id', assistant.reviseDraft],
+  ['GET', '/api/competitors', competitors.listCompetitors],
+  ['POST', '/api/competitors', competitors.createCompetitor],
+  ['POST', '/api/competitors/fetch', competitors.fetchNow],
+  ['POST', '/api/competitors/analyze', competitors.analyze],
+  ['DELETE', '/api/competitors/items/:id', competitors.deleteItem],
+  ['PATCH', '/api/competitors/:id', competitors.updateCompetitor],
+  ['DELETE', '/api/competitors/:id', competitors.deleteCompetitor],
+  ['POST', '/api/competitors/:id/items', competitors.addItem],
   ['GET', '/api/ads/accounts', ads.listAdAccounts],
   ['GET', '/api/ads/accounts/:id/campaigns', ads.accountCampaigns],
   ['GET', '/api/ads/campaigns/:id', ads.campaignDetail],
@@ -176,7 +185,10 @@ export default {
     return out;
   },
   // Cron Trigger 0 0 * * * (UTC) = 7h00 sáng giờ Việt Nam: trợ lý đọc tin, lập kế hoạch tuần, soạn bài ngày mai để chờ duyệt.
+  // Cron 30 23 * * * (UTC) = 6h30 sáng: theo dõi đối thủ, lấy bài website và tin báo mới (miễn phí, chỉ đọc nguồn công khai).
+  // Chạy riêng để không dùng chung giới hạn số lượt gọi ra ngoài của lần chạy trợ lý.
   async scheduled(event, env, ctx) {
+    if (event.cron === '30 23 * * *') { ctx.waitUntil(competitors.runCompetitors(env).catch((e) => console.error('competitors', e?.message))); return; }
     ctx.waitUntil(assistant.runDaily(env).catch((e) => console.error('assistant', e?.message)));
   },
 };
