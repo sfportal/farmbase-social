@@ -360,7 +360,7 @@ h2.sec { margin: 22px 0 10px; }
 .pm .hot span { color: var(--danger); }
 .err-t { color: var(--danger); }
 .pact { gap: 6px; flex-wrap: wrap; }
-@media (max-width: 899px) { .ovgrid { grid-template-columns: 1fr; } }
+@media (max-width: 899px) { .ovgrid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi .n { font-size: 22px; } .pcards { grid-template-columns: 1fr; } }
 
 /* Chủ đề nội dung và Trợ lý AI */
@@ -442,3 +442,11 @@ details.pfb textarea { margin: 6px 0; }
 .mprompt { background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 4px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .psug { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
 .psug .row { margin-top: 8px; gap: 8px; }
+/* Trợ lý: nhóm 2 phương án cho một chỗ đăng, bài chia sẻ tin báo */
+.optgrp { border: 1px solid var(--line); border-left: 4px solid var(--leaf); border-radius: 14px; padding: 10px 10px 2px; margin: 0 0 14px; background: color-mix(in srgb, var(--sprout) 30%, transparent); }
+.optgrp-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 4px 10px; }
+.optgrp-h svg { width: 16px; height: 16px; color: var(--forest); }
+.optgrp .adraft { margin-bottom: 10px; }
+.badge.opt { background: var(--forest); color: #fff; }
+.badge.share { background: #f2b705; color: #3a2a00; }
+.adraft.isshare { border-left: 4px solid #f2b705; }

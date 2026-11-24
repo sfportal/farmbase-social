@@ -757,14 +757,24 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(r.status, 403, 'biên tập không chạy trợ lý');
   r = await owner.req('/api/assistant/settings', { method: 'PUT', body: { page_id: '111', on: true, per_day: 1, times: ['19:30'], website: true } });
   assert.equal(r.status, 200);
+  // Tin báo trong kho kiến thức để trợ lý soạn bài chia sẻ
+  sql(`INSERT INTO social_knowledge (page_id, kind, title, body, digest, url, created_at) VALUES (NULL, 'news', 'Yêu cầu truy xuất mới cho sầu riêng', 'Nội dung tin\nNguồn: Báo A', 'Tóm tắt tin', 'https://bao.vn/tin-1.html', ${nowS()})`);
   r = await owner.req('/api/assistant/run', { method: 'POST', body: { page_id: '111', steps: ['learn', 'plan', 'drafts'] } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.ok(r.data.log.some((l) => /soạn 1 bài/.test(l)), r.data.log.join(' | '));
+  assert.ok(r.data.log.some((l) => /soạn 2 bài \(1 chỗ đăng, mỗi chỗ 2 phương án\)/.test(l)), r.data.log.join(' | '));
+  assert.ok(r.data.log.some((l) => /bài chia sẻ tin/.test(l)), r.data.log.join(' | '));
   r = await owner.req('/api/assistant?page_id=111');
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.plans.length >= 1, true, 'có kế hoạch tuần');
   assert.equal(r.data.plans.at(-1).days.length, 7);
-  const draft = r.data.drafts[0];
+  const draft = r.data.drafts.find((x) => x.ai_meta.option === 'A');
+  const draftB = r.data.drafts.find((x) => x.ai_meta.option === 'B');
+  assert.ok(draft && draftB && draft.ai_meta.slot === draftB.ai_meta.slot, 'mỗi chỗ đăng có 2 phương án');
+  assert.notEqual(draft.message, draftB.message);
+  const shareD = r.data.drafts.find((x) => x.ai_meta.kind === 'share');
+  assert.ok(shareD && shareD.ai_meta.share_url === 'https://bao.vn/tin-1.html', 'có bài chia sẻ tin báo');
+  assert.ok(shareD.message.includes('Nguồn: Báo A - https://bao.vn/tin-1.html'), shareD.message);
+  assert.ok(shareD.scheduled_at < draft.scheduled_at, 'bài chia sẻ đăng trước bài chính');
   assert.equal(draft.status, 'pending', 'bài trợ lý soạn luôn chờ duyệt');
   assert.ok(draft.ai_meta.reason && draft.ai_meta.check && draft.ai_meta.visual && draft.ai_meta.website?.title, JSON.stringify(draft.ai_meta));
   assert.ok(draft.message.startsWith('Bài viết thử của trợ lý AI'), draft.message);
@@ -772,10 +782,12 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.ok(draft.scheduled_at > nowS() + 3600, 'hẹn giờ ngày mai');
   r = await owner.req('/api/assistant/run', { method: 'POST', body: { page_id: '111', steps: ['drafts'] } });
   assert.ok(r.data.log.some((l) => /đã có bài/.test(l)), 'không soạn trùng ngày');
+  assert.equal((await owner.req('/api/assistant?page_id=111')).data.drafts.filter((x) => x.ai_meta.kind === 'share').length, 1, 'không chia sẻ trùng tin');
   // Góp ý để AI viết lại: lưu góp ý vào kho kiến thức
   r = await owner.req(`/api/assistant/revise/${draft.id}`, { method: 'POST', body: { feedback: 'Nhắc buổi tập huấn ngày 05/12' } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.ok(r.data.message.includes('Đã sửa theo góp ý'));
+  assert.ok(r.data.ai_meta.topic_title && r.data.ai_meta.check, 'cập nhật thông tin bài sau khi sửa');
   assert.equal(r.data.message.split('Hotline A').length, 2, 'không lặp phần cuối bài');
   assert.equal(r.data.message.split('Nhắn tin cho Trang A').length, 2, 'không lặp lời kêu gọi');
   r = await owner.req('/api/knowledge?page_id=111&kind=feedback');
@@ -794,6 +806,13 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   // Lịch đăng thấy bài trợ lý kèm lý do
   r = await owner.req('/api/content?page_id=111&status=pending');
   assert.ok(r.data.items.some((i) => i.ai?.reason), 'lịch đăng có ghi chú trợ lý');
+  // Duyệt phương án A thì phương án B tự chuyển sang từ chối
+  r = await owner.req(`/api/content/${draft.id}/approve`, { method: 'POST' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/assistant?page_id=111');
+  const bNow = r.data.drafts.find((x) => x.id === draftB.id);
+  assert.equal(bNow.status, 'rejected', JSON.stringify(bNow));
+  assert.equal(bNow.reject_reason, 'Đã chọn phương án khác');
   step('chủ đề nội dung, bộ mẫu, kho kiến thức, trợ lý AI lập kế hoạch tuần, soạn bài chờ duyệt, tự kiểm tra, góp ý, đề xuất cập nhật, đúng quyền');
 }
 
@@ -828,8 +847,9 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req(`/api/media/${m2.id}`, { method: 'DELETE' });
   assert.equal(r.status, 200);
   // Chọn model Claude (chỉ Chủ hệ thống)
-  r = await owner.req('/api/assistant/models', { method: 'PUT', body: { write: 'claude-haiku-5-5', fast: 'claude-haiku-5-5' } });
+  r = await owner.req('/api/assistant/models', { method: 'PUT', body: { write: 'claude-haiku-5-5', fast: 'claude-haiku-5-5', cheap: 'claude' } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.models.cheap, 'claude');
   r = await owner.req('/api/assistant/models', { method: 'PUT', body: { write: 'gpt-5', fast: 'claude-haiku-5-5' } });
   assert.equal(r.status, 400);
   r = await viewer.req('/api/assistant/models', { method: 'PUT', body: { write: 'claude-opus-5-5', fast: 'claude-haiku-5-5' } });
