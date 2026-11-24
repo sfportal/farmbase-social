@@ -9,6 +9,7 @@ const fmtNum = (n) => (n === null || n === undefined ? '–' : Number(n).toLocal
 const fmtTime = (t) => (t ? new Date(t * 1000).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '–');
 
 function toast(msg) {
+  if (!msg) return;
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
@@ -16,7 +17,13 @@ function toast(msg) {
   toast.t = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
+// Mỗi lần chuyển trang tăng navSeq. Lệnh đọc (GET) của trang cũ trả về sau khi đã chuyển trang
+// thì dừng lại (lỗi rỗng, không hiện), để trang cũ không ghi đè hoặc báo lỗi lên trang mới.
+let navSeq = 0;
+class StaleView extends Error { constructor() { super(''); this.stale = true; } }
+
 async function api(path, { method = 'GET', body, quiet = false } = {}) {
+  const seq = navSeq;
   const res = await fetch(path, {
     method,
     credentials: 'same-origin',
@@ -24,6 +31,7 @@ async function api(path, { method = 'GET', body, quiet = false } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
+  if (method === 'GET' && seq !== navSeq) throw new StaleView();
   if (!res.ok) {
     if (!quiet && data.code === 'unauthenticated') { me = null; go('dang-nhap'); }
     if (!quiet && data.code === 'must_change_password') { go('doi-mat-khau'); }
@@ -362,7 +370,7 @@ async function viewPages(q) {
         <div class="muted small">${fmtNum(p.followers_count)} người theo dõi · ${fmtNum(p.fan_count)} lượt thích${owner ? ` · ${p.staff_count} nhân viên được giao` : ''}</div>
         <div class="muted small">Cập nhật: ${fmtTime(p.stats_at)}${p.last_error ? ` · ${esc(p.last_error)}` : ''}</div></div>
       <div class="row"><a class="btn ghost sm" href="#/bai-dang?trang=${encodeURIComponent(p.id)}">Bài đăng</a>${canRefresh ? `<button class="btn ghost sm" data-auto="${esc(p.id)}" data-name="${esc(p.name)}">Tự trả lời</button><button class="btn ghost sm" data-refresh="${esc(p.id)}">Cập nhật</button>` : ''}
-        ${owner ? `<button class="btn danger sm" data-disc="${esc(p.id)}" data-name="${esc(p.name)}">Ngắt</button>` : ''}</div></div>`;
+        ${owner ? `<button class="btn ghost sm" data-staff="${esc(p.id)}" data-name="${esc(p.name)}">Giao nhân viên</button><button class="btn danger sm" data-disc="${esc(p.id)}" data-name="${esc(p.name)}">Ngắt</button>` : ''}</div></div>`;
   }).join('');
   document.getElementById('view').innerHTML = `${notice}${setup}<div class="card">${rows || `<p class="muted" style="margin:0">${owner ? 'Chưa có Fanpage nào. Bấm "Kết nối Fanpage", đăng nhập Facebook và chọn các Trang Quý khách quản trị.' : 'Quý khách chưa được giao Fanpage nào.'}</p>`}</div>
     ${owner ? '<p class="muted small">Kết nối lại bất cứ lúc nào để thêm Trang mới hoặc làm mới mã truy cập. Mã truy cập được mã hóa trước khi lưu.</p>' : ''}
@@ -378,6 +386,7 @@ async function viewPages(q) {
     catch (e) { toast(e.message); b.disabled = false; }
   }));
   document.querySelectorAll('[data-auto]').forEach((b) => (b.onclick = () => openAutoReply(b.dataset.auto, b.dataset.name)));
+  document.querySelectorAll('[data-staff]').forEach((b) => (b.onclick = () => openPageStaff(b.dataset.staff, b.dataset.name)));
   document.querySelectorAll('[data-disc]').forEach((b) => (b.onclick = async () => {
     if (!(await confirmBox('Ngắt kết nối Fanpage?', `Hệ thống sẽ xóa mã truy cập của "${b.dataset.name}" và dừng mọi việc tự động trên Trang này. Có thể kết nối lại sau.`, 'Ngắt kết nối', true))) return;
     try { await api(`/api/pages/${encodeURIComponent(b.dataset.disc)}/disconnect`, { method: 'POST' }); toast('Đã ngắt kết nối'); viewPages(new URLSearchParams()); }
@@ -385,6 +394,34 @@ async function viewPages(q) {
   }));
 }
 
+// Giao Fanpage cho nhân viên ngay tại mục Fanpage (chỉ Chủ hệ thống). Lưu vào danh sách Trang của từng người.
+function openPageStaff(pageId, pageName) {
+  modal(`<h2>Giao nhân viên cho Fanpage</h2><p class="muted small" style="margin-top:0">${esc(pageName)}</p><div id="psbox" class="muted">Đang tải…</div>`, async (m, close) => {
+    let users;
+    try { ({ users } = await api('/api/users')); } catch (e) { m.querySelector('#psbox').textContent = e.message; return; }
+    const staff = users.filter((u) => u.role !== 'owner');
+    m.querySelector('#psbox').outerHTML = `
+      <p class="muted small">Đánh dấu những người được làm việc trên Trang này. Chủ hệ thống luôn thấy mọi Fanpage.</p>
+      ${staff.length ? staff.map((u) => `<label class="check"><input type="checkbox" data-uid="${u.id}" ${u.page_ids.includes(pageId) ? 'checked' : ''}> <span><b>${esc(u.name || u.email)}</b> <span class="muted small">${esc(u.role_label)}${u.status === 'disabled' ? ' · đã vô hiệu' : ''}</span></span></label>`).join('')
+        : '<div class="muted small">Chưa có nhân viên. Vào mục Nhân viên để thêm tài khoản.</div>'}
+      <div id="psmsg"></div>
+      <div class="actions"><button class="btn ghost" data-x>Đóng</button>${staff.length ? '<button class="btn" data-save>Lưu</button>' : ''}</div>`;
+    m.querySelector('[data-x]').onclick = close;
+    const save = m.querySelector('[data-save]');
+    if (save) save.onclick = async () => {
+      save.disabled = true;
+      try {
+        for (const u of staff) {
+          const on = m.querySelector(`[data-uid="${u.id}"]`).checked;
+          if (on === u.page_ids.includes(pageId)) continue;
+          const page_ids = on ? [...u.page_ids, pageId] : u.page_ids.filter((x) => x !== pageId);
+          await api(`/api/users/${u.id}`, { method: 'PATCH', body: { page_ids } });
+        }
+        toast('Đã lưu nhân viên được giao'); close(); viewPages(new URLSearchParams());
+      } catch (e) { m.querySelector('#psmsg').innerHTML = `<div class="alert err">${esc(e.message)}</div>`; save.disabled = false; }
+    };
+  });
+}
 
 // ---------- Hộp thư ----------
 const CHANNEL = { message: '', comment: 'Bình luận', public_reply: 'Trả lời bình luận', private_reply: 'Nhắn riêng' };
@@ -1586,21 +1623,28 @@ async function viewUsers() {
       <label for="u-email">Email đăng nhập</label><input id="u-email" type="email" value="${esc(u?.email || '')}" ${u ? 'disabled' : ''}>
       <label for="u-role">Vai trò</label><select id="u-role">${roles.map((r) => `<option value="${r.id}" ${(u?.role || 'agent') === r.id ? 'selected' : ''}>${esc(r.label)}</option>`).join('')}</select>
       ${u ? `<label for="u-status">Trạng thái</label><select id="u-status"><option value="active" ${u.status === 'active' ? 'selected' : ''}>Đang hoạt động</option><option value="disabled" ${u.status === 'disabled' ? 'selected' : ''}>Vô hiệu hóa (nghỉ việc)</option></select>` : ''}
-      <label>Fanpage được giao</label>
-      ${pages.length ? pages.map((p) => `<label class="check"><input type="checkbox" value="${esc(p.id)}" ${u?.page_ids.includes(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('') : '<div class="muted small">Chưa có Fanpage nào được kết nối.</div>'}
-      <div class="muted small">Chủ hệ thống luôn thấy mọi Fanpage.</div>
+      <div id="u-pages"><label>Fanpage được giao</label>
+      ${pages.length > 1 ? '<label class="check"><input type="checkbox" id="u-all"> <b>Chọn tất cả</b></label>' : ''}
+      ${pages.length ? pages.map((p) => `<label class="check"><input type="checkbox" data-pg value=""${esc(p.id)}" ${u?.page_ids.includes(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('') : '<div class="muted small">Chưa có Fanpage nào được kết nối.</div>'}
+      </div><div class="muted small" id="u-ownernote">Chủ hệ thống luôn thấy mọi Fanpage.</div>
       <div id="umsg"></div>
       <div class="actions"><button type="button" class="btn ghost" data-cancel>Hủy</button><button class="btn">${u ? 'Lưu' : 'Tạo tài khoản'}</button></div>
     </form>`;
 
   const openForm = (u) => modal(userForm(u), (m, close) => {
     m.querySelector('[data-cancel]').onclick = close;
+    const role = m.querySelector('#u-role'); const all = m.querySelector('#u-all');
+    const pgs = [...m.querySelectorAll('[data-pg]')];
+    const sync = () => { m.querySelector('#u-pages').hidden = role.value === 'owner'; if (all) all.checked = pgs.length && pgs.every((i) => i.checked); };
+    role.onchange = sync; sync();
+    if (all) all.onchange = () => pgs.forEach((i) => (i.checked = all.checked));
+    pgs.forEach((i) => i.addEventListener('change', sync));
     m.querySelector('#uf').onsubmit = async (e) => {
       e.preventDefault();
       const body = {
         name: m.querySelector('#u-name').value,
         role: m.querySelector('#u-role').value,
-        page_ids: [...m.querySelectorAll('.check input:checked')].map((i) => i.value),
+        page_ids: [...m.querySelectorAll('[data-pg]:checked')].map((i) => i.value),
       };
       try {
         if (u) {
@@ -2012,11 +2056,11 @@ function promptsHtml(a) {
   const kind = (k) => (k === 'video' ? 'Video' : 'Ảnh');
   return `<h2 class="sec">Prompt cho hình ảnh, video</h2>
     <div class="card"><div class="row between"><div class="muted small">Mỗi sáng thứ Hai, trợ lý đề xuất vài mẫu prompt mới (hiệu ứng, kiểu thiết kế) chưa có trong Thư viện. Quý khách duyệt thì mẫu vào mục Prompt bổ sung và trợ lý dùng cho các bài sau.</div>
-      ${a.can_run ? '<button class="btn ghost sm" id="psug">Đề xuất prompt mới</button>' : ''}</div>
+      ${a.can_settings ? '<button class="btn ghost sm" id="psug">Đề xuất prompt mới</button>' : ''}</div>
     ${sug.map((x) => `<div class="tf psug"><div class="row between"><b>${esc(x.name)}</b><span class="badge off">${kind(x.kind)}</span></div>
       ${x.why ? `<div class="small">${esc(x.why)}</div>` : ''}${x.keywords ? `<div class="muted small">Từ khóa: ${esc(x.keywords)}</div>` : ''}
       <div class="pre small mprompt">${esc(x.text)}</div>
-      <div class="row">${a.can_run ? `<button class="btn sm" data-pacc="${esc(x.sid)}">Thêm vào Thư viện</button><button class="btn ghost sm" data-pdis="${esc(x.sid)}">Bỏ qua</button>` : ''}<button class="btn ghost sm" data-cpx="${esc(x.sid)}">Sao chép</button></div></div>`).join('') || '<div class="muted small" style="margin-top:8px">Chưa có prompt đề xuất nào đang chờ.</div>'}
+      <div class="row">${a.can_settings ? `<button class="btn sm" data-pacc="${esc(x.sid)}">Thêm vào Thư viện</button><button class="btn ghost sm" data-pdis="${esc(x.sid)}">Bỏ qua</button>` : ''}<button class="btn ghost sm" data-cpx="${esc(x.sid)}">Sao chép</button></div></div>`).join('') || '<div class="muted small" style="margin-top:8px">Chưa có prompt đề xuất nào đang chờ.</div>'}
     ${extra.length ? `<details style="margin-top:12px"><summary>Prompt bổ sung đã duyệt (${extra.length})</summary>${extra.map((x) => `<div class="tf"><div class="row between"><b>${esc(x.id)} · ${esc(x.name)}</b><button class="btn ghost sm" data-cpx="${esc(x.id)}">Sao chép</button></div><div class="pre small mprompt">${esc(x.text)}</div></div>`).join('')}</details>` : ''}</div>`;
 }
 async function viewAssistant() {
@@ -2082,13 +2126,14 @@ async function viewAssistant() {
   }).join('') : '<div class="card muted">Chưa có bài nào do trợ lý soạn.</div>';
   v.innerHTML = `${topicsHint}
     <div class="grid ascfg"><div class="card"><h2>Chạy tự động</h2>
-      <label class="check"><input type="checkbox" id="aon" ${cfg.on ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Mỗi sáng 7h00 soạn bài cho ngày mai (chờ Quý khách duyệt, không tự đăng)</label>
-      <div class="row"><label for="aper" class="grow">Số bài mỗi ngày</label><select id="aper" class="sm" ${a.can_run ? '' : 'disabled'}><option value="1" ${cfg.per_day === 1 ? 'selected' : ''}>1 bài</option><option value="2" ${cfg.per_day === 2 ? 'selected' : ''}>2 bài</option></select></div>
-      <div class="row"><label for="at1" class="grow">Giờ đăng gợi ý</label><input id="at1" type="time" value="${esc(cfg.times[0] || '19:30')}" ${a.can_run ? '' : 'disabled'}><input id="at2" type="time" value="${esc(cfg.times[1] || '11:30')}" ${a.can_run ? '' : 'disabled'}></div>
-      <div class="row"><label for="aopt" class="grow">Phương án cho mỗi bài</label><select id="aopt" class="sm" ${a.can_run ? '' : 'disabled'}><option value="2" ${cfg.options !== 1 ? 'selected' : ''}>2 phương án để chọn</option><option value="1" ${cfg.options === 1 ? 'selected' : ''}>1 phương án</option></select></div>
-      <label class="check"><input type="checkbox" id="ashare" ${cfg.share !== false ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Thêm 1 bài chia sẻ tin báo mỗi ngày (có nguồn, liên kết bài gốc)</label>
-      <label class="check"><input type="checkbox" id="aweb" ${cfg.website ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Gợi ý thêm bài cho website</label>
-      ${a.can_run ? '<div class="row"><button class="btn sm" id="asave">Lưu cài đặt</button><button class="btn ghost sm" id="arun">Chạy ngay</button></div>' : ''}
+      <label class="check"><input type="checkbox" id="aon" ${cfg.on ? 'checked' : ''} ${a.can_settings ? '' : 'disabled'}> Mỗi sáng 7h00 soạn bài cho ngày mai (chờ Quý khách duyệt, không tự đăng)</label>
+      <div class="row"><label for="aper" class="grow">Số bài mỗi ngày</label><select id="aper" class="sm" ${a.can_settings ? '' : 'disabled'}><option value="1" ${cfg.per_day === 1 ? 'selected' : ''}>1 bài</option><option value="2" ${cfg.per_day === 2 ? 'selected' : ''}>2 bài</option></select></div>
+      <div class="row"><label for="at1" class="grow">Giờ đăng gợi ý</label><input id="at1" type="time" value="${esc(cfg.times[0] || '19:30')}" ${a.can_settings ? '' : 'disabled'}><input id="at2" type="time" value="${esc(cfg.times[1] || '11:30')}" ${a.can_settings ? '' : 'disabled'}></div>
+      <div class="row"><label for="aopt" class="grow">Phương án cho mỗi bài</label><select id="aopt" class="sm" ${a.can_settings ? '' : 'disabled'}><option value="2" ${cfg.options !== 1 ? 'selected' : ''}>2 phương án để chọn</option><option value="1" ${cfg.options === 1 ? 'selected' : ''}>1 phương án</option></select></div>
+      <label class="check"><input type="checkbox" id="ashare" ${cfg.share !== false ? 'checked' : ''} ${a.can_settings ? '' : 'disabled'}> Thêm 1 bài chia sẻ tin báo mỗi ngày (có nguồn, liên kết bài gốc)</label>
+      <label class="check"><input type="checkbox" id="aweb" ${cfg.website ? 'checked' : ''} ${a.can_settings ? '' : 'disabled'}> Gợi ý thêm bài cho website</label>
+      ${a.can_run ? `<div class="row">${a.can_settings ? '<button class="btn sm" id="asave">Lưu cài đặt</button>' : ''}<button class="btn ghost sm" id="arun">Chạy ngay</button></div>` : ''}
+      ${a.can_settings ? '' : '<div class="muted small">Thiết lập AI (chạy tự động, số bài, phương án, model, Thư viện prompt) do Chủ hệ thống quản lý. Quý khách vẫn chạy, góp ý, viết lại và duyệt bài được.</div>'}
       <div class="muted small">Lần chạy gần nhất: ${a.last_run ? fmtTime(a.last_run) : 'chưa chạy'}</div>${a.last_log.length ? `<details><summary class="small">Nhật ký lần chạy</summary>${a.last_log.map((l) => `<div class="small">• ${esc(l)}</div>`).join('')}</details>` : ''}</div>
     <div class="card"><h2>AI và chi phí tháng ${esc(usage.month.slice(5))}/${esc(usage.month.slice(0, 4))}</h2>
       <div>AI đang dùng: <b>${esc(a.provider || 'chưa cài')}</b></div>
@@ -2257,9 +2302,10 @@ async function pickMedia(pageId, onPick) {
 }
 
 async function render() {
+  const seq = ++navSeq;
   const { path, q } = parseHash();
   if (!me) {
-    try { me = (await api('/api/auth/me', { quiet: true })).user || null; } catch { me = null; }
+    try { me = (await api('/api/auth/me', { quiet: true })).user || null; } catch (e) { if (e.stale) return; me = null; }
   }
   if (!me) { if (path !== 'dang-nhap') { location.hash = '#/dang-nhap'; return; } return viewLogin(); }
   if (me.must_change_password) { if (path !== 'doi-mat-khau') { location.hash = '#/doi-mat-khau'; return; } return viewForceChange(); }
@@ -2283,6 +2329,7 @@ async function render() {
       default: return await viewHome();
     }
   } catch (e) {
+    if (e.stale || seq !== navSeq) return;
     const v = document.getElementById('view');
     if (v) v.innerHTML = `<div class="alert err">${esc(e.message)}</div>`;
   }
