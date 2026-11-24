@@ -267,6 +267,23 @@ r = await new Client().req('/api/fb/connect', { redirect: 'manual' });
 assert.match(r.headers.get('location'), /#\/dang-nhap/);
 r = await owner.req('/api/audit');
 assert.ok(r.data.entries.some((e) => e.action === 'user_created'));
+assert.ok(r.data.staff.length >= 2 && r.data.staff.some((u) => u.logins > 0 && u.last_seen_at), JSON.stringify(r.data.staff));
+assert.ok(r.data.entries.some((e) => e.action === 'login' && e.user_agent), 'lưu thiết bị đăng nhập');
+r = await owner.req('/api/audit?group=dang-nhap&summary=0');
+assert.ok(r.data.entries.length && r.data.entries.every((e) => ['login', 'logout', 'logout_all', 'login_failed', 'account_locked', 'password_changed', 'password_reset'].includes(e.action)), 'lọc theo loại');
+assert.equal(r.data.staff, undefined);
+{
+  const all = await owner.req('/api/audit');
+  const uid = all.data.entries.find((e) => e.user_id && e.action === 'user_created').user_id;
+  r = await owner.req(`/api/audit?user=${uid}&limit=5`);
+  assert.ok(r.data.entries.every((e) => e.user_id === uid), 'lọc theo nhân viên');
+  r = await owner.req(`/api/audit?before=${all.data.entries[0].id}&limit=500`);
+  assert.ok(r.data.entries.every((e) => e.id < all.data.entries[0].id), 'xem thêm');
+  r = await owner.req(`/api/audit?from=${Math.floor(Date.now() / 1000) + 3600}`);
+  assert.equal(r.data.entries.length, 0, 'lọc theo ngày');
+  r = await owner.req('/api/audit?failed=1');
+  assert.ok(r.data.entries.every((e) => ['login_failed', 'account_locked', 'post_publish_failed', 'pages_connect_failed'].includes(e.action)));
+}
 step('kết nối Facebook chuyển sang hộp thoại đăng nhập; nhật ký ghi đủ thao tác');
 
 // 9. Bài đăng và số tương tác (đọc từ Facebook giả)
