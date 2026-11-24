@@ -151,29 +151,33 @@ function compose(st, style, body, source = '') {
 }
 
 // Tự kiểm tra một bài: quy tắc cứng trước, rồi Claude Haiku đối chiếu dữ kiện và quy định (rẻ). Lỗi thì nhận bản sửa.
-async function selfCheck(env, { body, sub, st, campaign, stats = false }) {
+async function selfCheck(env, { body, sub, st, campaign, stats = false, media = null }) {
   let text = body;
+  let mfix = null;
   let issues = ruleCheck(text, { campaign, stats });
   let by = 'Quy tắc nội dung';
   if (aiProvider(env) && aiProvider(env) !== 'workers') {
     try {
       const { text: out } = await generate(env, {
-        tier: 'fast', maxTokens: 4000,
-        system: 'Bạn là người kiểm duyệt bài đăng Fanpage. Đối chiếu bài với quy định và dữ kiện được phép dùng. Chỉ báo lỗi thật: bịa số liệu hoặc dữ kiện không có trong danh sách, sai quy định, thiếu hook hoặc CTA, câu sáo rỗng vô nghĩa, đoạn dài quá 2 câu. Trả JSON.',
-        prompt: `[VIEC:check] QUY ĐỊNH:\n${cut(st.value, 2500)}\n\nDỮ KIỆN ĐƯỢC PHÉP DÙNG:\n${cut(sub?.facts || '', 1200)}\n\nCTA CỦA CHỦ ĐỀ: ${sub?.cta || '-'}\n\nLỖI ĐÃ PHÁT HIỆN BẰNG QUY TẮC: ${issues.join('; ') || 'không'}\n\nBÀI CẦN KIỂM TRA:\n${text}\n\nTrả JSON {"ok": true|false, "issues": ["lỗi ngắn gọn"], "fixed": "thân bài đã sửa nếu có lỗi, để trống nếu ok"}`,
+        tier: 'fast', maxTokens: media ? 7000 : 4000,
+        system: 'Bạn là người kiểm duyệt bài đăng Fanpage. Đối chiếu bài với quy định và dữ kiện được phép dùng. Chỉ báo lỗi thật: bịa số liệu hoặc dữ kiện không có trong danh sách, sai quy định, thiếu hook hoặc CTA, câu sáo rỗng vô nghĩa, đoạn dài quá 2 câu. Khi có prompt hình: kiểm tra hình có minh họa đúng bài không. Trả JSON.',
+        prompt: `[VIEC:check] QUY ĐỊNH:\n${cut(st.value, 2500)}\n\nDỮ KIỆN ĐƯỢC PHÉP DÙNG:\n${cut(sub?.facts || '', 1200)}\n\nCTA CỦA CHỦ ĐỀ: ${sub?.cta || '-'}\n\nLỖI ĐÃ PHÁT HIỆN BẰNG QUY TẮC: ${issues.join('; ') || 'không'}\n\nBÀI CẦN KIỂM TRA:\n${text}${media ? `\n\nHÌNH ĐỀ XUẤT: ${cut(media.visual, 500)}\nPROMPT TẠO HÌNH:\n${cut(media.media_prompt, 3000)}\n\nKIỂM TRA HÌNH (bắt buộc): prompt hình phải minh họa đúng hook và thông điệp chính của bài (bản cuối, kể cả khi bạn sửa bài); chữ trên hình phải lấy từ nội dung bài; không có chữ, con số, chủ đề lạ không có trong bài (ví dụ "10.000 ha" khi bài không nói). Lệch thì viết lại prompt hình theo đúng 8 mục: 1. Mục đích và khổ; 2. Chủ thể và bối cảnh; 3. Bố cục; 4. Chữ trên hình; 5. Màu và kiểu chữ; 6. Phong cách, ánh sáng; 7. Hiệu ứng; 8. Tránh.` : ''}\n\nTrả JSON {"ok": true|false, "issues": ["lỗi ngắn gọn"], "fixed": "thân bài đã sửa nếu có lỗi, để trống nếu ok"${media ? ', "media_ok": true|false, "media_issue": "hình lệch chỗ nào (ngắn)", "visual_fixed": "tóm tắt hình mới nếu lệch", "media_fixed": "prompt hình mới đủ 8 mục nếu lệch, để trống nếu khớp"' : ''}}`,
       });
       const r = parseJson(out) || {};
       by = 'Quy tắc nội dung và Claude Haiku';
+      if (media && r.media_ok === false && typeof r.media_fixed === 'string' && r.media_fixed.trim().length > 80) {
+        mfix = { media_prompt: tidy(r.media_fixed), visual: cut(r.visual_fixed, 600) || media.visual, issue: cut(r.media_issue, 200) };
+      }
       if (Array.isArray(r.issues)) issues = [...new Set([...issues, ...r.issues.map((x) => cut(x, 160)).filter(Boolean)])].slice(0, 8);
       if (r.ok === false && typeof r.fixed === 'string' && r.fixed.trim().length > 40) {
         const fixed = tidy(r.fixed);
         const left = ruleCheck(fixed, { campaign, stats });
-        if (left.length < ruleCheck(text, { campaign, stats }).length || !left.length) return { text: fixed, check: { ok: !left.length, issues, fixed: true, remaining: left, by } };
+        if (left.length < ruleCheck(text, { campaign, stats }).length || !left.length) return { text: fixed, media: mfix, check: { ok: !left.length, issues, fixed: true, remaining: left, by, media_fixed: !!mfix } };
       }
-      if (r.ok === true && !ruleCheck(text, { campaign, stats }).length) return { text, check: { ok: true, issues: [], by } };
+      if (r.ok === true && !ruleCheck(text, { campaign, stats }).length) return { text, media: mfix, check: { ok: true, issues: [], by, media_fixed: !!mfix } };
     } catch (e) { console.error('check', e?.message); }
   }
-  return { text, check: { ok: !issues.length, issues, by } };
+  return { text, media: mfix, check: { ok: !issues.length, issues, by, media_fixed: !!mfix } };
 }
 
 // ---------- 1. Đọc tin mới vào kho kiến thức ----------
@@ -282,6 +286,21 @@ async function loadPlan(env, pageId, ws) {
   return { ...(parseJson(r.body) || {}), week_start: ws, updated_at: r.updated_at };
 }
 
+// Chọn mẫu prompt hợp Trang và định dạng: mẫu riêng Chiến dịch 10.000 ha không dùng cho Trang khác; bỏ mẫu tài liệu.
+export function mediaTemplates(lib, { campaign = false, ids = [], format = '' } = {}) {
+  const ok = (id) => {
+    const x = lib[id];
+    if (!x || x.k === 'doc') return false;
+    if (!campaign && (id.startsWith('cd-') || /10\.?000\s*ha/i.test(`${x.n} ${String(x.t).slice(0, 400)}`))) return false;
+    return true;
+  };
+  const video = /video|reels|clip/i.test(format);
+  const base = campaign ? (video ? ['cd-01', 'ha-08'] : ['ha-01', 'ha-02', 'ha-04']) : (video ? ['fb-02', 'fb-03', 'fb-09'] : ['ha-01', 'ha-02', 'tx-02']);
+  return [...new Set([...ids, ...base].filter((id) => id && ok(id)))].slice(0, 5);
+}
+const tplBlock = (lib, ids) => ids.map((id) => `[${id}] ${lib[id].n} (${lib[id].k === 'video' ? 'video' : 'ảnh'}):\n${cut(lib[id].t, 800)}`).join('\n\n');
+const MEDIA_ALIGN = `QUAN TRỌNG VỀ HÌNH: "visual" và "media_prompt" phải minh họa đúng chính bài viết đó. Chữ trên hình lấy từ hook hoặc ý chính của bài; cảnh trong hình đúng cảnh bài nói (ví dụ bài nói quét QR xem hành trình vườn thì hình là điện thoại quét tem QR trên trái sầu riêng, màn hình hiện trang truy xuất có vùng trồng, nhật ký, ảnh vườn). Mẫu thư viện chỉ là khung kỹ thuật (bố cục, chuyển động, hiệu ứng): thay toàn bộ chữ, con số, chủ đề của mẫu bằng nội dung bài, không giữ lại chữ hay số của mẫu. Bài ảnh chọn mẫu ảnh, bài video chọn mẫu video. "prompt_id" chỉ được là một mã trong danh sách mẫu bên dưới.`;
+
 // Hướng dẫn viết prompt hình ảnh, video thật chi tiết (Quý khách dán thẳng vào Claude hoặc công cụ tạo hình).
 const MEDIA_GUIDE = `CÁCH VIẾT "media_prompt" (chi tiết, chuyên nghiệp, dán thẳng vào công cụ tạo hình; tiếng Việt, 150–320 chữ), theo đúng 8 mục, mỗi mục một dòng:
 1. Mục đích và khổ: loại (ảnh đơn, carousel, video ngắn), khổ 4:5 hoặc 1:1 hoặc 9:16, độ phân giải 1080 px.
@@ -333,8 +352,8 @@ export async function makeDrafts(env, page, date, cfg, log = []) {
       const idx = done.n + i + 1;
       const sub0 = byId[slot.topic_id];
       // Mẫu prompt trong Thư viện cho chỗ này (mã trong kế hoạch, rồi mã của chủ đề con): AI chỉnh thành prompt hoàn chỉnh.
-      const tplIds = [...new Set([slot.prompt_id, ...(sub0?.prompt_ids || '').split(',')].filter((id) => id && lib[id]))].slice(0, 3);
-      const tplText = tplIds.map((id) => `[${id}] ${lib[id].n} (${lib[id].k === 'video' ? 'video' : lib[id].k === 'image' ? 'ảnh' : 'tài liệu'}):\n${cut(lib[id].t, 900)}`).join('\n\n');
+      const tplIds = mediaTemplates(lib, { campaign, ids: [slot.prompt_id, ...(sub0?.prompt_ids || '').split(',')], format: `${slot.format || ''} ${sub0?.formats || ''}` });
+      const tplText = tplBlock(lib, tplIds);
       const optLine = nOpt > 1
         ? `Viết ${nOpt} PHƯƠNG ÁN khác hẳn nhau để người duyệt chọn 1: phương án A theo góc bài trong kế hoạch; phương án B đổi góc tiếp cận (ví dụ kể chuyện thật, hỏi đáp, số liệu so sánh, mẹo nhanh, hậu trường) và đổi định dạng hình hoặc video nếu hợp. Hai phương án phải khác hook, khác cách mở bài, khác hình.`
         : 'Viết 1 phương án tốt nhất.';
@@ -344,6 +363,7 @@ ${optLine}
 Mỗi bài 90 đến 190 chữ: dòng đầu là hook cụ thể gây tò mò hoặc chạm nỗi lo thật của bà con, doanh nghiệp; thân bài 2–4 đoạn ngắn có ý cụ thể dùng được ngay; kết bằng câu kêu gọi theo CTA của chủ đề con. Ưu tiên dữ kiện trong tài liệu, kho kiến thức.
 ${tplText ? `MẪU PROMPT TRONG THƯ VIỆN (chọn mẫu hợp nhất cho từng phương án, chỉnh theo nội dung bài):\n${tplText}` : ''}
 ${MEDIA_GUIDE}
+${MEDIA_ALIGN}
 Trả JSON {"posts":[{"option":"A","topic_id":0,"angle":"góc tiếp cận 3–8 chữ","hook":"câu móc","message":"thân bài hoàn chỉnh (gồm hook ở đầu, không gồm liên hệ và hashtag)","visual":"tóm tắt hình ảnh hoặc video cần làm (1–2 câu)","prompt_id":"mã mẫu prompt đã chọn","media_prompt":"8 mục như hướng dẫn","storyboard":"nếu là video; không thì để trống","reason":"vì sao phương án này hiệu quả hôm đó (1–2 câu, có thể dựa vào tương tác)","source":"link nguồn nếu dùng tin tức, không thì để trống"${cfg.website && i === 0 ? ',"website":{"title":"tiêu đề bài website dưới 60 ký tự","outline":"dàn ý 3–5 ý"}' : ''}}]}`;
       const { text, provider } = await generate(env, { tier: 'write', maxTokens: 3500 * nOpt, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
       const out = parseJson(text);
@@ -364,12 +384,15 @@ Trả JSON {"posts":[{"option":"A","topic_id":0,"angle":"góc tiếp cận 3–8
         const raw = tidy(String(p.message || '')).slice(0, 4000);
         if (raw.length < 40) continue;
         const source = /^https?:\/\//.test(p.source || '') ? String(p.source).slice(0, 500) : '';
-        const checked = await selfCheck(env, { body: enforceStyle(raw, { rules: st.value, strip: true }), sub, st, campaign });
+        // Haiku kiểm tra cả bài và prompt hình: hình lệch bài thì viết lại prompt cho khớp bản cuối.
+        const media0 = { visual: cut(p.visual || slot.visual, 600), media_prompt: cut(p.media_prompt, 4000) };
+        const checked = await selfCheck(env, { body: enforceStyle(raw, { rules: st.value, strip: true }), sub, st, campaign, media: media0.media_prompt ? media0 : null });
+        const media = checked.media || media0;
         const meta = {
           date, by: 'assistant', provider: PROVIDER_LABELS[provider], slot: key, option: opts.length > 1 ? String.fromCharCode(65 + j) : '', options: opts.length,
-          hook: cut(p.hook, 200), visual: cut(p.visual || slot.visual, 600),
-          prompt_id: /^[a-z]{2}-\d{2}$/.test(p.prompt_id || '') ? p.prompt_id : (sub?.prompt_ids || '').split(',')[0] || '',
-          media_prompt: cut(p.media_prompt, 4000), storyboard: cut(p.storyboard, 2500), storyboard_id: sub?.storyboard_id || '', reason: cut(p.reason || slot.why, 500),
+          hook: cut(p.hook, 200), visual: media.visual,
+          prompt_id: tplIds.includes(p.prompt_id) ? p.prompt_id : tplIds[0] || '',
+          media_prompt: media.media_prompt, storyboard: cut(p.storyboard, 2500), storyboard_id: sub?.storyboard_id || '', reason: cut(p.reason || slot.why, 500),
           angle: cut(p.angle, 80) || slot.angle || '', check: checked.check, website: cfg.website && p.website?.title ? { title: cut(p.website.title, 90), outline: cut(p.website.outline, 800) } : null,
           ads: sub?.ads ? cut(sub.ads, 400) : '', topic_title: sub?.title || '', parent_title: sub?.parent_title || '',
         };
@@ -669,23 +692,28 @@ export async function reviseDraft(request, env, user, id) {
   const src = (row.message.match(/^\s*Nguồn:\s*(\S+)\s*$/im) || [])[1] || '';
   const meta = parseJson(row.ai_meta) || {};
   const share = meta.kind === 'share';
+  const campaign = /10\.?000/.test(page.name);
+  const lib = await promptLibrary(env);
+  const tplIds = mediaTemplates(lib, { campaign, ids: (sub?.prompt_ids || '').split(','), format: `${sub?.formats || ''} ${meta.visual || ''}` });
   const { text, provider } = await generate(env, {
-    tier: 'write', maxTokens: 5000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`,
+    tier: 'write', maxTokens: 6000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`,
     prompt: `[VIEC:revise] Viết lại bài dưới đây theo góp ý của người duyệt. Giữ dữ kiện đúng, không thêm số liệu mới${stats ? ' (được dùng số liệu triển khai có trong hồ sơ Fanpage vì người duyệt yêu cầu)' : ''}.
 ${sub ? `CHỦ ĐỀ CON HIỆN TẠI: (id ${sub.id}) ${sub.title} | CTA: ${sub.cta}` : 'Bài chưa gắn chủ đề con: chọn chủ đề con hợp nhất trong danh sách (ghi đúng id).'}
 GÓP Ý: ${feedback}
 
 BÀI HIỆN TẠI:
 ${body}
-${share ? '' : `\nHÌNH ĐANG ĐỀ XUẤT: ${cut(meta.visual, 400) || '-'}\n\n${MEDIA_GUIDE}\nCập nhật hình và prompt cho khớp bài mới.`}
+${share ? '' : `\nHÌNH ĐANG ĐỀ XUẤT: ${cut(meta.visual, 400) || '-'}\n\nMẪU PROMPT TRONG THƯ VIỆN:\n${tplBlock(lib, tplIds)}\n\n${MEDIA_GUIDE}\n${MEDIA_ALIGN}\nViết lại hình và prompt hình cho khớp bài mới.`}
 Trả JSON {"topic_id":0,"message":"thân bài mới (không liên hệ, không hashtag${share ? ', không liên kết' : ''})","reason":"vì sao bài mới hiệu quả hơn (1–2 câu)"${share ? '' : ',"visual":"tóm tắt hình hoặc video","prompt_id":"mã mẫu prompt","media_prompt":"8 mục như hướng dẫn","storyboard":"nếu là video"'}}`,
   });
   const r = parseJson(text) || {};
   const newBody = typeof r.message === 'string' && r.message.trim().length > 40 ? r.message : (!/^\s*[{[]/.test(text) && text.trim().length > 40 ? text : '');
   const revised = tidy(provider === 'fake' || !newBody ? `${body}\n\n(Đã sửa theo góp ý: ${feedback})` : newBody);
-  const checked = await selfCheck(env, { body: enforceStyle(revised, { rules: st.value, strip: true }), sub, st, campaign: /10\.?000/.test(page.name), stats });
+  const media0 = share ? null : { visual: cut(r.visual || meta.visual, 600), media_prompt: cut(r.media_prompt || meta.media_prompt, 4000) };
+  const checked = await selfCheck(env, { body: enforceStyle(revised, { rules: st.value, strip: true }), sub, st, campaign, stats, media: media0?.media_prompt ? media0 : null });
   const message = compose(st, style, checked.text, src);
   meta.check = checked.check;
+  if (checked.media) { r.visual = checked.media.visual; r.media_prompt = checked.media.media_prompt; }
   // Cập nhật luôn phần giải thích, hình và prompt theo bài mới (trước đây chỉ đổi thân bài nên thông tin cũ bị lệch).
   const nsub = ctx.subs.find((x) => x.id === Number(r.topic_id)) || sub;
   meta.topic_title = nsub?.title || '';
@@ -694,7 +722,7 @@ Trả JSON {"topic_id":0,"message":"thân bài mới (không liên hệ, không 
   if (!share && r.visual) meta.visual = cut(r.visual, 600);
   if (!share && r.media_prompt) meta.media_prompt = cut(r.media_prompt, 4000);
   if (!share && typeof r.storyboard === 'string') meta.storyboard = cut(r.storyboard, 2500);
-  if (!share && /^[a-z]{2}-\d{2}$/.test(r.prompt_id || '')) meta.prompt_id = r.prompt_id;
+  if (!share) meta.prompt_id = tplIds.includes(r.prompt_id) ? r.prompt_id : tplIds.includes(meta.prompt_id) ? meta.prompt_id : tplIds[0] || '';
   if (nsub) meta.storyboard_id = nsub.storyboard_id || meta.storyboard_id || '';
   meta.feedback = [...(meta.feedback || []), { text: feedback, at: now() }].slice(-5);
   await env.DB.prepare('UPDATE social_content SET message = ?, topic_id = ?, ai_meta = ?, updated_at = ? WHERE id = ?').bind(message, nsub?.id || null, JSON.stringify(meta), now(), row.id).run();

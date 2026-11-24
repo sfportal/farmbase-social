@@ -255,7 +255,7 @@ export const TEMPLATES = {
             facts: 'Các bước: khảo sát vườn → tạo vùng trồng, lô đất trên trang quản lý → tập huấn bà con ghi nhật ký trên Zalo → QR vùng trồng và QR từng lô\nĐã kết nối hệ thống truy xuất nông sản Bộ NN&MT từ 01/07/2026 (cho vùng đã có mã)\nKhông nêu số hộ, diện tích, số vùng đã triển khai trừ khi được yêu cầu',
             ideas: 'Carousel 4 bước có ảnh thật\nReels 20 giây "trước và sau khi số hóa"',
             formats: 'Carousel 4:5, Reels 20 giây', visual: 'Ảnh thật từng bước: khảo sát, màn hình trang quản lý (dữ liệu mẫu), tập huấn, tem QR',
-            prompt_ids: 'cd-04,tx-04', storyboard_id: 'tvc-thucte', ads: 'Mục tiêu: Tương tác; nhắm lại người đã xem video hướng dẫn.',
+            prompt_ids: 'ha-02,fb-09,tx-04', storyboard_id: 'tvc-thucte', ads: 'Mục tiêu: Tương tác; nhắm lại người đã xem video hướng dẫn.',
             keywords: '' }),
           T({ title: 'Báo chí ghi nhận', goal: 'Niềm tin từ bên thứ ba', audience: 'Doanh nghiệp, cán bộ, HTX',
             hook: 'Báo chí ghi nhận: [tên bài].',
