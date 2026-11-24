@@ -101,6 +101,14 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
   const { PROMPT_LIB } = await import('../src/lib/prompt-lib.js');
   assert.deepEqual(Object.keys(PROMPT_LIB).sort(), [...ids].sort(), 'src/lib/prompt-lib.js khớp public/prompt/data.js');
   for (const p of window.PROMPTS) assert.equal(PROMPT_LIB[p.id].t, p.text.slice(0, 1500), `prompt ${p.id} khớp nội dung`);
+  // Mẫu prompt hợp Trang: Trang FarmBase không dùng mẫu riêng Chiến dịch 10.000 ha
+  const { mediaTemplates } = await import('../src/routes/assistant.js');
+  const libA = await (await import('../src/routes/assistant.js')).promptLibrary({ DB: { prepare: () => ({ bind: () => ({ first: async () => null }), first: async () => null }) } });
+  const fbIds = mediaTemplates(libA, { campaign: false, ids: ['cd-04', 'tx-04', 'tl-01'], format: 'Ảnh 4:5' });
+  assert.ok(!fbIds.some((id) => id.startsWith('cd-') || id.startsWith('tl-')), fbIds.join(','));
+  assert.ok(fbIds.includes('tx-04') && fbIds.includes('ha-01'), fbIds.join(','));
+  assert.ok(mediaTemplates(libA, { campaign: true, ids: ['cd-04'] }).includes('cd-04'));
+  for (const t of TEMPLATES.farmbase.topics) for (const c of t.children) assert.ok(!/cd-/.test(c.prompt_ids), `farmbase/${c.title}: không dùng mẫu 10.000 ha`);
   for (const tpl of Object.values(TEMPLATES)) for (const t of tpl.topics) for (const c of t.children) {
     for (const id of c.prompt_ids.split(',')) assert.ok(ids.has(id), `prompt ${id} có trong thư viện`);
     if (c.storyboard_id) assert.ok(sbs.has(c.storyboard_id), `storyboard ${c.storyboard_id} có trong thư viện`);
