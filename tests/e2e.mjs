@@ -955,6 +955,10 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(r.data.total, 4, r.data.log.join('\n'));
   r = await owner.req('/api/competitors/fetch', { method: 'POST', body: { competitor_id: cid } });
   assert.equal(r.data.total, 0, 'lần sau không thêm trùng');
+  // Cập nhật tất cả: chạy theo ngân sách lượt gọi ra ngoài, website không có RSS được đánh dấu để không dò lại mỗi ngày
+  r = await owner.req('/api/competitors/fetch', { method: 'POST', body: {} });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(typeof r.data.left === 'number');
   r = await viewer.req(`/api/competitors?competitor_id=${cid}`);
   const its = r.data.items;
   assert.deepEqual([...new Set(its.map((i) => i.kind))].sort(), ['ad', 'article', 'news', 'post']);

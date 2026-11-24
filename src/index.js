@@ -185,10 +185,10 @@ export default {
     return out;
   },
   // Cron Trigger 0 0 * * * (UTC) = 7h00 sáng giờ Việt Nam: trợ lý đọc tin, lập kế hoạch tuần, soạn bài ngày mai để chờ duyệt.
-  // Cron 30 23 * * * (UTC) = 6h30 sáng: theo dõi đối thủ, lấy bài website và tin báo mới (miễn phí, chỉ đọc nguồn công khai).
-  // Chạy riêng để không dùng chung giới hạn số lượt gọi ra ngoài của lần chạy trợ lý.
+  // Cron 15,45 22,23 * * * (UTC) = 5h15 đến 6h45 sáng, 4 lượt: theo dõi đối thủ, lấy bài website và tin báo mới
+  // (miễn phí, chỉ đọc nguồn công khai). Mỗi lượt cập nhật một phần đối thủ chưa cập nhật trong 20 giờ, vì giới hạn số lượt gọi ra ngoài.
   async scheduled(event, env, ctx) {
-    if (event.cron === '30 23 * * *') { ctx.waitUntil(competitors.runCompetitors(env).catch((e) => console.error('competitors', e?.message))); return; }
+    if (event.cron === '15,45 22,23 * * *') { ctx.waitUntil(competitors.runCompetitors(env, { staleHours: 20 }).catch((e) => console.error('competitors', e?.message))); return; }
     ctx.waitUntil(assistant.runDaily(env).catch((e) => console.error('assistant', e?.message)));
   },
 };
