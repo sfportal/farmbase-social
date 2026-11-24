@@ -102,6 +102,13 @@ export async function listContent(request, env, user) {
   return json({ items, counts, can_create: user.role !== 'agent', can_approve: isManager(user), media_enabled: mediaEnabled(env) });
 }
 
+// Prompt hình ảnh, video tạo từ khung Soạn bài (lưu trong ai_meta, cờ manual để không lẫn với bài trợ lý AI).
+export function cleanAiMedia(x) {
+  if (!x || typeof x !== 'object' || typeof x.media_prompt !== 'string' || !x.media_prompt.trim()) return null;
+  const s = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  return { manual: 1, media_kind: x.media_kind === 'video' ? 'video' : 'image', prompt_id: /^[a-z]{2}-\d{2}$/.test(x.prompt_id || '') ? x.prompt_id : '', prompt_name: s(x.prompt_name, 200), visual: s(x.visual, 600), media_prompt: s(x.media_prompt, 4000), storyline: s(x.storyline, 1500), storyboard: s(x.storyboard, 2500) };
+}
+
 // POST /api/content  { page_ids[], message, link, image_url, scheduled_at, action: draft|submit|publish }
 export async function createContent(request, env, user) {
   if (user.role === 'agent') throw new HttpError(403, 'Tài khoản Chăm sóc khách hàng không soạn bài được', 'forbidden');
@@ -123,12 +130,14 @@ export async function createContent(request, env, user) {
   if (pageIds.some((p) => !allowed.includes(p))) throw new HttpError(400, 'Có Fanpage không được giao cho Quý khách', 'bad_page');
 
   const status = action === 'submit' ? 'pending' : 'draft';
+  const am = cleanAiMedia(body.ai_media);
+  const aiMeta = am ? JSON.stringify(am) : null;
   const created = [];
   for (const pageId of pageIds) {
     const r = await env.DB.prepare(
-      `INSERT INTO social_content (page_id, message, link, image_url, media_ids, scheduled_at, status, created_by, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id`
-    ).bind(pageId, msgFor(pageId), f.link, f.image_url, mediaIds, f.scheduled_at, status, user.id, t, t).first();
+      `INSERT INTO social_content (page_id, message, link, image_url, media_ids, scheduled_at, status, created_by, created_at, updated_at, ai_meta)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id`
+    ).bind(pageId, msgFor(pageId), f.link, f.image_url, mediaIds, f.scheduled_at, status, user.id, t, t, aiMeta).first();
     created.push(r.id);
   }
   await audit(env, request, user.id, action === 'submit' ? 'post_submitted' : 'post_created', snippet(f.message), { ids: created, pages: pageIds });
@@ -139,6 +148,16 @@ export async function createContent(request, env, user) {
     else items.push(shape(await loadItem(env, user, id), t));
   }
   return json({ items }, 201);
+}
+
+// Gộp prompt hình ảnh, video mới vào ai_meta sẵn có (bài trợ lý giữ nguyên các trường khác).
+async function saveAiMedia(env, row, x) {
+  const am = cleanAiMedia(x);
+  if (!am) return;
+  let old = {};
+  try { old = JSON.parse(row.ai_meta || 'null') || {}; } catch { old = {}; }
+  const meta = old.slot || old.kind || old.date ? { ...old, ...am, manual: undefined } : { ...old, ...am };
+  await env.DB.prepare('UPDATE social_content SET ai_meta = ? WHERE id = ?').bind(JSON.stringify(meta), row.id).run();
 }
 
 // PATCH /api/content/:id
@@ -156,6 +175,7 @@ export async function updateContent(request, env, user, id) {
   await env.DB.prepare(
     'UPDATE social_content SET message = ?, link = ?, image_url = ?, media_ids = ?, scheduled_at = ?, status = ?, reject_reason = NULL, updated_at = ? WHERE id = ?'
   ).bind(f.message, f.link, f.image_url, mediaIds, f.scheduled_at, status, t, row.id).run();
+  await saveAiMedia(env, row, body.ai_media);
   await audit(env, request, user.id, 'post_updated', snippet(f.message), { id: row.id });
   return json({ item: shape(await loadItem(env, user, row.id), t) });
 }
@@ -185,6 +205,7 @@ async function updateScheduled(request, env, user, row) {
   await env.DB.prepare(
     'UPDATE social_content SET message = ?, link = ?, image_url = ?, media_ids = ?, scheduled_at = ?, fb_post_id = ?, last_error = NULL, updated_at = ? WHERE id = ?'
   ).bind(f.message, f.link, f.image_url, mediaIds, f.scheduled_at, newId, t, row.id).run();
+  await saveAiMedia(env, row, body.ai_media);
   await audit(env, request, user.id, 'post_rescheduled', snippet(f.message), { id: row.id, page: row.page_name, fb_post_id: newId, old_fb_post_id: row.fb_post_id });
   return json({ item: shape(await loadItem(env, user, row.id), t) });
 }

@@ -151,6 +151,11 @@ function fakeJson(prompt) {
     return JSON.stringify({ posts });
   }
   if (kind === 'share') return JSON.stringify({ pick: 1, topic_id: sub, hook: 'Tin đáng chú ý cho bà con', message: 'Tin đáng chú ý cho bà con trồng sầu riêng tuần này.\n\nBài báo nêu yêu cầu mới về truy xuất nguồn gốc khi xuất khẩu.\n\nGóc nhìn: bà con nên ghi nhật ký vườn đều từ bây giờ. Mời bà con đọc bài gốc.', reason: 'Tin mới, đúng chủ đề truy xuất' });
+  if (kind === 'media') {
+    const pid = (prompt.match(/\[([a-z]{2}-\d{2})\]/) || [])[1] || '';
+    const video = /cần một video/.test(prompt);
+    return JSON.stringify({ prompt_id: pid, why: 'Mẫu thử khớp bài', visual: video ? 'Video 9:16: điện thoại quét tem QR trên trái sầu riêng' : 'Ảnh 4:5: điện thoại quét tem QR trên trái sầu riêng', media_prompt: '1. Mục đích và khổ: ảnh đơn 4:5, 1080x1350 px.\n2. Chủ thể và bối cảnh: bàn tay cầm điện thoại quét tem QR trên trái sầu riêng trong vườn.\n4. Chữ trên hình: "Một mã QR, xem cả hành trình vườn".\n5. Màu: xanh FarmBase #084C46.', ...(video ? { storyline: 'Mở bằng câu hỏi, quét QR, hiện hành trình vườn, kết bằng lời mời.', storyboard: '0–3s | cận tem QR | "Một mã QR" | | cắt nhanh\n3–8s | màn hình trang truy xuất | "Xem cả hành trình vườn" | | trượt' } : {}) });
+  }
   if (kind === 'check') return JSON.stringify({ ok: true, issues: [] });
   if (kind === 'digest') return JSON.stringify({ items: [...prompt.matchAll(/\[TIN (\d+)\]/g)].map((m) => ({ n: Number(m[1]), digest: 'Tóm tắt tin thử', relevant: true })) });
   if (kind === 'suggest') return JSON.stringify({ suggestions: [{ action: 'new', parent_id: ids[0] || null, title: 'Chủ đề con đề xuất thử', hook: 'Câu móc đề xuất', message: 'Thông điệp đề xuất', cta: 'Nhắn tin cho Fanpage', reason: 'Từ tin tức mới trong kho' }] });

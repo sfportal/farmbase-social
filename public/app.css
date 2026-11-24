@@ -439,6 +439,13 @@ details.pfb textarea { margin: 6px 0; }
 .aiwhy svg, .aibadge svg { width: 15px; height: 15px; vertical-align: -3px; }
 .aibadge { display: inline-flex; align-items: center; gap: 4px; color: var(--forest); font-weight: 600; background: var(--sprout); padding: 1px 8px; border-radius: 999px; }
 @media (prefers-color-scheme: dark) { .aibadge { color: var(--leaf); } }
+.mpres { margin-top: 10px; display: grid; gap: 6px; }
+.mpres textarea { font-size: 13.5px; }
+.mpf .row { margin-bottom: 2px; }
+#mpnote { margin-top: 8px; }
+details.cmp { margin: 6px 0; }
+details.cmp summary { cursor: pointer; color: var(--forest); font-weight: 600; }
+details.cmp .btn { margin-top: 6px; }
 .mprompt { background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 4px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .psug { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
 .psug .row { margin-top: 8px; gap: 8px; }
