@@ -103,45 +103,64 @@ const I = {
   src: '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/><path d="m15 15 2 2 3-3"/>',
   topic: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="12" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M8.5 6H12v12H8.5M12 12h3.5"/>',
   bot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 17h5"/>',
+  ai: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 3l.6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6z"/>',
+  post: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 13h6M7 16h10"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   media: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
 
 // ---------- Khung trang ----------
+// Menu chia nhóm: Làm việc hằng ngày · Nội dung · Hiệu quả · Quản trị. Tài khoản nằm ở chân menu.
 function navItems() {
+  const staff = me.role !== 'agent';
+  const mgr = me.role === 'owner' || me.role === 'manager';
   const items = [
-    { r: 'tong-quan', label: 'Tổng quan', ic: 'home' },
-    { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox' },
-    { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal' },
-    ...(me.role !== 'agent' ? [{ r: 'tro-ly', label: 'Trợ lý AI', ic: 'bot' }, { r: 'chu-de', label: 'Chủ đề nội dung', ic: 'topic' }, { r: 'kho-media', label: 'Kho ảnh, video', ic: 'media' }, { r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src' }] : []),
-    { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule' },
-    { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
-    { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
-    { r: 'bao-cao', label: 'Báo cáo', ic: 'report' },
-    { r: 'thu-vien-prompt', href: '/prompt/', label: 'Thư viện prompt', ic: 'lib' },
+    { r: 'tong-quan', label: 'Tổng quan', ic: 'home', sec: '' },
+    { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox', sec: '' },
+    { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal', sec: '' },
+    ...(staff ? [{ r: 'tro-ly', label: 'Trợ lý AI', ic: 'ai', sec: 'Nội dung' }, { r: 'chu-de', label: 'Chủ đề nội dung', ic: 'topic', sec: 'Nội dung' }, { r: 'kho-media', label: 'Kho ảnh, video', ic: 'media', sec: 'Nội dung' }, { r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src', sec: 'Nội dung' }] : []),
+    { r: 'thu-vien-prompt', href: '/prompt/', label: 'Thư viện prompt', ic: 'lib', sec: 'Nội dung' },
+    { r: 'bai-dang', label: 'Bài đăng', ic: 'post', sec: 'Hiệu quả' },
+    { r: 'bao-cao', label: 'Báo cáo', ic: 'report', sec: 'Hiệu quả' },
+    ...(mgr ? [{ r: 'quang-cao', label: 'Quảng cáo', ic: 'ads', sec: 'Hiệu quả' }] : []),
+    { r: 'fanpage', label: 'Fanpage', ic: 'pages', sec: 'Quản trị' },
+    { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule', sec: 'Quản trị' },
+    ...(me.role === 'owner' ? [{ r: 'nhan-vien', label: 'Nhân viên', ic: 'users', sec: 'Quản trị' }, { r: 'nhat-ky', label: 'Nhật ký', ic: 'log', sec: 'Quản trị' }] : []),
+    { r: 'tai-khoan', label: 'Tài khoản', ic: 'me', sec: 'foot' },
   ];
-  if (me.role === 'owner' || me.role === 'manager') items.push({ r: 'quang-cao', label: 'Quảng cáo', ic: 'ads' });
-  if (me.role === 'owner') {
-    items.push({ r: 'nhan-vien', label: 'Nhân viên', ic: 'users' });
-    items.push({ r: 'nhat-ky', label: 'Nhật ký', ic: 'log' });
-  }
-  items.push({ r: 'tai-khoan', label: 'Tài khoản', ic: 'me' });
   return items;
+}
+
+const navLink = (i, active) => `<a href="${i.href || '#/' + i.r}" class="${i.r === active ? 'on' : ''}" ${i.r === active ? 'aria-current="page"' : ''}>${icon(i.ic)}<span>${i.label}</span>${i.r === 'hop-thu' ? '<span class="tag unread" data-unread hidden></span>' : ''}</a>`;
+function navHtml(items, active) {
+  let html = '';
+  let sec = null;
+  for (const i of items.filter((x) => x.sec !== 'foot')) {
+    if (i.sec !== sec) { sec = i.sec; if (sec) html += `<div class="nsec">${esc(sec)}</div>`; }
+    html += navLink(i, active);
+  }
+  return html;
 }
 
 function layout(active, title, sub, body, actions = '') {
   const items = navItems();
-  const side = items.map((i) => `<a href="${i.href || '#/' + i.r}" class="${i.r === active ? 'on' : ''} ${i.soon ? 'soon' : ''}" ${i.soon ? 'aria-disabled="true" tabindex="-1"' : ''}>${icon(i.ic)}<span>${i.label}</span>${i.soon ? `<span class="tag">${i.soon}</span>` : ''}${i.r === 'hop-thu' ? '<span class="tag unread" data-unread hidden></span>' : ''}</a>`).join('');
-  const mobile = ['tong-quan', 'hop-thu', 'lich-dang', 'fanpage', 'tai-khoan']
-    .filter(Boolean).map((r) => items.find((i) => i.r === r))
-    .map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''}">${icon(i.ic)}<span>${i.label}</span></a>`).join('');
+  const side = navHtml(items, active);
+  const mob = ['tong-quan', 'hop-thu', 'lich-dang', me.role !== 'agent' ? 'tro-ly' : 'fanpage'].map((r) => items.find((i) => i.r === r)).filter(Boolean);
+  const inMob = mob.some((i) => i.r === active);
+  const mobile = mob.map((i) => `<a href="#/${i.r}" class="${i.r === active ? 'on' : ''}">${icon(i.ic)}<span>${i.label}</span>${i.r === 'hop-thu' ? '<span class="tag unread" data-unread hidden></span>' : ''}</a>`).join('')
+    + `<a href="#" id="navmore" class="${inMob ? '' : 'on'}">${icon('menu')}<span>Thêm</span></a>`;
   $app.innerHTML = `<div class="shell">
     <aside class="side"><div class="brand"><img src="/icons/icon.svg" alt="">FarmBase Social</div>
       <nav class="nav" aria-label="Menu chính">${side}</nav>
-      <div class="who"><b>${esc(me.name || me.email)}</b><span>${esc(me.role_label)}</span></div></aside>
+      <a class="who ${active === 'tai-khoan' ? 'on' : ''}" href="#/tai-khoan" title="Tài khoản">${icon('me')}<span><b>${esc(me.name || me.email)}</b><span>${esc(me.role_label)}</span></span></a></aside>
     <main class="main"><div class="top"><div><h1>${esc(title)}</h1>${sub ? `<div class="muted">${sub}</div>` : ''}</div><div class="row">${actions}</div></div>
       <div id="view">${body}</div></main>
     <nav class="bottom" aria-label="Menu">${mobile}</nav></div>`;
+  document.getElementById("navmore").onclick = (e) => {
+    e.preventDefault();
+    modal(`<h2>Menu</h2><nav class="nav sheet" aria-label="Menu đầy đủ">${navHtml(items, active)}${navLink(items.find((i) => i.r === 'tai-khoan'), active)}</nav>`, (m, close) => m.querySelectorAll('a').forEach((a) => a.addEventListener('click', close)));
+  };
   window.scrollTo(0, 0);
   refreshUnread();
 }
@@ -758,8 +777,8 @@ function contentCard(c, perms) {
       ${c.link ? `<div class="small ellipsis"><a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.link)}</a></div>` : ''}
       ${c.reject_reason ? `<div class="alert warn small">Lý do từ chối: ${esc(c.reject_reason)}</div>` : ''}
       ${c.status === 'failed' && c.last_error ? `<div class="alert err small">Facebook báo lỗi: ${esc(c.last_error)}</div>` : ''}
-      ${c.ai?.reason ? `<div class="small aiwhy">🤖 ${esc(c.ai.topic_title ? `${c.ai.topic_title}: ` : '')}${esc(c.ai.reason)}${c.ai.check && !c.ai.check.ok ? ' <span class="badge warn">Cần xem lại</span>' : ''}</div>` : ''}
-      <div class="muted small">Soạn: ${esc(c.created_by_name || (c.ai ? 'Trợ lý AI' : '–'))}${c.approved_by_name ? ` · Duyệt: ${esc(c.approved_by_name)}` : ''}</div>
+      ${c.ai?.reason ? `<div class="small aiwhy">${icon('ai')} ${esc(c.ai.topic_title ? `${c.ai.topic_title}: ` : '')}${esc(c.ai.reason)}${c.ai.check && !c.ai.check.ok ? ' <span class="badge warn">Cần xem lại</span>' : ''}</div>` : ''}
+      <div class="muted small">Soạn: ${c.ai && !c.created_by_name ? `<span class="aibadge">${icon('ai')}Trợ lý AI</span>` : esc(c.created_by_name || '–')}${c.approved_by_name ? ` · Duyệt: ${esc(c.approved_by_name)}` : ''}</div>
       ${acts.length ? `<div class="row" style="margin-top:8px">${acts.join('')}</div>` : ''}
     </div></article>`;
 }
@@ -1619,7 +1638,7 @@ const ACTIONS = {
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
   post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
-  media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
+  media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', prompt_accepted: 'Thêm prompt bổ sung', prompt_dismissed: 'Bỏ qua prompt đề xuất', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   topics_seeded: 'Nạp bộ chủ đề mẫu', topics_replaced: 'Thay bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
   knowledge_added: 'Nạp tài liệu', knowledge_updated: 'Sửa tóm tắt kiến thức', knowledge_deleted: 'Xóa kiến thức', suggestion_accepted: 'Chấp nhận đề xuất chủ đề', suggestion_dismissed: 'Bỏ qua đề xuất chủ đề',
@@ -1976,6 +1995,19 @@ function engagementHtml(a) {
     <div class="muted small">Trợ lý dùng số liệu này khi lập kế hoạch, soạn bài, và đề xuất cân chỉnh chủ đề vào sáng thứ Hai, thứ Năm. Đề xuất chỉ áp dụng khi Quý khách bấm Chấp nhận.</div>
     ${a.can_run ? '<div class="row"><button class="btn ghost sm" id="engsug">Phân tích và đề xuất cân chỉnh chủ đề</button></div>' : ''}</section>`;
 }
+function promptsHtml(a) {
+  const sug = a.prompt_suggestions || [];
+  const extra = a.prompt_extra || [];
+  const kind = (k) => (k === 'video' ? 'Video' : 'Ảnh');
+  return `<h2 class="sec">Prompt cho hình ảnh, video</h2>
+    <div class="card"><div class="row between"><div class="muted small">Mỗi sáng thứ Hai, trợ lý đề xuất vài mẫu prompt mới (hiệu ứng, kiểu thiết kế) chưa có trong Thư viện. Quý khách duyệt thì mẫu vào mục Prompt bổ sung và trợ lý dùng cho các bài sau.</div>
+      ${a.can_run ? '<button class="btn ghost sm" id="psug">Đề xuất prompt mới</button>' : ''}</div>
+    ${sug.map((x) => `<div class="tf psug"><div class="row between"><b>${esc(x.name)}</b><span class="badge off">${kind(x.kind)}</span></div>
+      ${x.why ? `<div class="small">${esc(x.why)}</div>` : ''}${x.keywords ? `<div class="muted small">Từ khóa: ${esc(x.keywords)}</div>` : ''}
+      <div class="pre small mprompt">${esc(x.text)}</div>
+      <div class="row">${a.can_run ? `<button class="btn sm" data-pacc="${esc(x.sid)}">Thêm vào Thư viện</button><button class="btn ghost sm" data-pdis="${esc(x.sid)}">Bỏ qua</button>` : ''}<button class="btn ghost sm" data-cpx="${esc(x.sid)}">Sao chép</button></div></div>`).join('') || '<div class="muted small" style="margin-top:8px">Chưa có prompt đề xuất nào đang chờ.</div>'}
+    ${extra.length ? `<details style="margin-top:12px"><summary>Prompt bổ sung đã duyệt (${extra.length})</summary>${extra.map((x) => `<div class="tf"><div class="row between"><b>${esc(x.id)} · ${esc(x.name)}</b><button class="btn ghost sm" data-cpx="${esc(x.id)}">Sao chép</button></div><div class="pre small mprompt">${esc(x.text)}</div></div>`).join('')}</details>` : ''}</div>`;
+}
 async function viewAssistant() {
   layout('tro-ly', 'Trợ lý AI', 'Mỗi sáng 7h00: đọc tin, lập kế hoạch tuần, soạn bài cho ngày mai để Quý khách duyệt trong ngày', '<div class="muted">Đang tải…</div>');
   const pick = await topicPagePick();
@@ -1983,7 +2015,10 @@ async function viewAssistant() {
   pick.bind();
   const v = document.getElementById('view');
   if (!topicState.page) { v.innerHTML = '<div class="card">Chưa có Fanpage nào.</div>'; return; }
-  const [a, lib] = await Promise.all([api(`/api/assistant?page_id=${encodeURIComponent(topicState.page)}`), loadPromptLib()]);
+  const [a, lib0] = await Promise.all([api(`/api/assistant?page_id=${encodeURIComponent(topicState.page)}`), loadPromptLib()]);
+  // Prompt bổ sung đã duyệt hiện cùng Thư viện prompt
+  const lib = { ...lib0, prompts: { ...lib0.prompts } };
+  for (const x of a.prompt_extra || []) lib.prompts[x.id] = { id: x.id, name: x.name, kind: x.kind, text: x.text, groupName: 'Prompt bổ sung', tool: 'Claude', dungcho: x.why };
   const cfg = a.cfg;
   const tname = (id) => { for (const d of a.drafts) if (d.topic_id === id) return d.ai_meta.topic_title; return ''; };
   const topicsHint = a.page.subs ? '' : `<div class="alert warn">Trang này chưa có chủ đề con. <a href="#/chu-de">Mở Chủ đề</a> để nạp bộ mẫu hoặc tạo chủ đề, trợ lý mới soạn bài được.</div>`;
@@ -2001,13 +2036,14 @@ async function viewAssistant() {
   const draftsHtml = a.drafts.length ? a.drafts.map((d) => {
     const m = d.ai_meta; const [lb, cls] = DSTATUS[d.status] || [d.status, 'off'];
     const chk = m.check || {};
-    return `<article class="card adraft" id="ad-${d.id}"><div class="row between"><div><span class="badge ${cls}">${lb}</span> <b>${esc(m.topic_title || 'Bài trợ lý')}</b> <span class="muted small">${m.parent_title ? `· ${esc(m.parent_title)}` : ''}</span></div>
+    return `<article class="card adraft" id="ad-${d.id}"><div class="row between"><div><span class="aibadge">${icon('ai')}Trợ lý AI</span> <span class="badge ${cls}">${lb}</span> <b>${esc(m.topic_title || 'Bài trợ lý')}</b> <span class="muted small">${m.parent_title ? `· ${esc(m.parent_title)}` : ''}</span></div>
         <span class="muted small">${d.scheduled_at ? `Hẹn ${fmtTime(d.scheduled_at)}` : ''}</span></div>
       <div class="adgrid"><div class="msg">${esc(d.message)}</div>
       <div class="admeta">
         ${m.reason ? `<div class="tf"><div class="muted small">Vì sao nên đăng</div>${esc(m.reason)}</div>` : ''}
         <div class="tf"><div class="muted small">Tự kiểm tra (${esc(chk.by || '')})</div>${chk.ok ? '<span class="badge ok">Đạt</span>' : `<span class="badge warn">Cần xem lại</span>`}${chk.fixed ? ' <span class="muted small">AI đã tự sửa</span>' : ''}${(chk.ok ? [] : chk.remaining?.length ? chk.remaining : chk.issues || []).map((x) => `<div class="small">• ${esc(x)}</div>`).join('')}</div>
-        ${m.visual ? `<div class="tf"><div class="muted small">Hình ảnh, video cần làm</div>${esc(m.visual)}${m.prompt_id ? `<div>${promptChip(lib, m.prompt_id)}</div>` : ''}</div>` : ''}
+        ${m.visual ? `<div class="tf"><div class="muted small">Hình ảnh, video cần làm</div>${esc(m.visual)}${m.prompt_id ? `<div>Mẫu gốc: ${promptChip(lib, m.prompt_id)}</div>` : ''}</div>` : ''}
+        ${m.media_prompt ? `<div class="tf"><div class="row between"><span class="muted small">Prompt sẵn để tạo hình (dán vào Claude)</span><button type="button" class="btn ghost sm" data-cp="${d.id}">Sao chép</button></div><div class="pre small mprompt">${esc(m.media_prompt)}</div></div>` : ''}
         ${m.storyboard ? `<div class="tf"><div class="muted small">Storyboard</div><div class="pre small">${esc(m.storyboard)}</div></div>` : ''}${storyboardHtml(lib, m.storyboard_id)}
         ${m.website ? `<div class="tf"><div class="muted small">Gợi ý bài website</div><b>${esc(m.website.title)}</b><div class="small pre">${esc(m.website.outline || '')}</div></div>` : ''}
         ${m.ads ? `<div class="tf"><div class="muted small">Gợi ý quảng cáo</div><div class="small">${esc(m.ads)}</div></div>` : ''}
@@ -2032,8 +2068,19 @@ async function viewAssistant() {
       <div class="muted small">Tiết kiệm: Haiku cho việc nhanh, Sonnet chỉ khi viết bài; AI chỉ đọc bản tóm tắt chủ đề và kiến thức; phần hướng dẫn cố định được cache; mỗi Trang 1 lần lập kế hoạch mỗi tuần và 1 lần soạn bài mỗi ngày.</div></div></div>
     ${engagementHtml(a)}
     <h2 class="sec">Bài trợ lý soạn</h2>${draftsHtml}
+    ${promptsHtml(a)}
     <h2 class="sec">Kế hoạch tuần</h2>${plansHtml}`;
   bindPrompts(v, lib);
+  const copy = async (txt) => { try { await navigator.clipboard.writeText(txt); toast('Đã sao chép prompt'); } catch { toast('Không sao chép được, vui lòng chép tay'); } };
+  v.querySelectorAll('[data-cp]').forEach((b) => (b.onclick = () => copy(a.drafts.find((x) => String(x.id) === b.dataset.cp)?.ai_meta.media_prompt || '')));
+  v.querySelectorAll('[data-cpx]').forEach((b) => (b.onclick = () => copy([...(a.prompt_extra || []), ...(a.prompt_suggestions || [])].find((x) => (x.id || x.sid) === b.dataset.cpx)?.text || '')));
+  v.querySelectorAll('[data-pacc],[data-pdis]').forEach((b) => (b.onclick = async () => {
+    try { const r = await api(`/api/assistant/prompts/${b.dataset.pacc || b.dataset.pdis}/${b.dataset.pacc ? 'accept' : 'dismiss'}`, { method: 'POST' }); toast(b.dataset.pacc ? `Đã thêm vào Prompt bổ sung (${r.id})` : 'Đã bỏ qua'); viewAssistant(); } catch (e) { toast(e.message); }
+  }));
+  v.querySelector('#psug')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang đề xuất…';
+    try { const r = await api('/api/assistant/prompts/suggest', { method: 'POST' }); toast(r.log?.slice(-1)[0] || 'Xong'); viewAssistant(); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Đề xuất prompt mới'; }
+  });
   v.querySelector('#msave2')?.addEventListener('click', async () => {
     try { await api('/api/assistant/models', { method: 'PUT', body: { write: v.querySelector('#mw').value, fast: v.querySelector('#mf').value } }); toast('Đã đổi model Claude'); viewAssistant(); } catch (e) { toast(e.message); }
   });

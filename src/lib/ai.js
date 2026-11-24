@@ -137,10 +137,11 @@ function fakeJson(prompt) {
     const days = [...prompt.matchAll(/NGAY (\d{4}-\d{2}-\d{2})/g)].map((m) => m[1]);
     return JSON.stringify({ focus: 'Tuần thử nghiệm: giới thiệu chủ đề chính', note: 'Có thể đổi theo tin tức', days: days.map((d) => ({ date: d, posts: [{ topic_id: sub, angle: 'Góc bài thử', format: 'Ảnh 4:5', visual: 'Ảnh vườn thật', time: '19:30' }] })) });
   }
-  if (kind === 'draft') return JSON.stringify({ posts: [{ topic_id: sub, hook: 'Câu móc thử', message: 'Bài viết thử của trợ lý AI cho ngày mai. Nội dung ngắn gọn, rõ ràng.\n\nMời bà con nhắn tin để được hướng dẫn.', visual: 'Ảnh 4:5: bà con ghi nhật ký tại vườn', prompt_id: 'ha-01', storyboard: '', reason: 'Bám kế hoạch tuần và chủ đề con', website: { title: 'Gợi ý bài website thử', outline: 'Mở bài; Thân bài; Kết bài' } }] });
+  if (kind === 'draft') return JSON.stringify({ posts: [{ topic_id: sub, hook: 'Câu móc thử', message: 'Bài viết thử của trợ lý AI cho ngày mai. Nội dung ngắn gọn, rõ ràng.\n\nMời bà con nhắn tin để được hướng dẫn.', visual: 'Ảnh 4:5: bà con ghi nhật ký tại vườn', prompt_id: 'ha-01', media_prompt: 'Ảnh 4:5, bà con ghi nhật ký trên điện thoại tại vườn sầu riêng, chữ trên ảnh: "Ghi nhật ký vài chạm", màu xanh FarmBase', storyboard: '', reason: 'Bám kế hoạch tuần và chủ đề con', website: { title: 'Gợi ý bài website thử', outline: 'Mở bài; Thân bài; Kết bài' } }] });
   if (kind === 'check') return JSON.stringify({ ok: true, issues: [] });
   if (kind === 'digest') return JSON.stringify({ items: [...prompt.matchAll(/\[TIN (\d+)\]/g)].map((m) => ({ n: Number(m[1]), digest: 'Tóm tắt tin thử', relevant: true })) });
   if (kind === 'suggest') return JSON.stringify({ suggestions: [{ action: 'new', parent_id: ids[0] || null, title: 'Chủ đề con đề xuất thử', hook: 'Câu móc đề xuất', message: 'Thông điệp đề xuất', cta: 'Nhắn tin cho Fanpage', reason: 'Từ tin tức mới trong kho' }] });
+  if (kind === 'prompts') return JSON.stringify({ prompts: [{ name: 'Tem QR bật thẻ hành trình vườn', kind: 'video', text: 'Video 9:16, 10 giây: tay cầm điện thoại quét tem QR trên trái sầu riêng, thẻ hành trình vườn trượt lên theo hiệu ứng parallax, chữ [NỘI DUNG], màu xanh #084C46', keywords: 'parallax, mockup điện thoại', why: 'Dùng cho chủ đề truy xuất nguồn gốc' }] });
   if (kind === 'summary') return JSON.stringify({ digest: 'Tóm tắt tài liệu thử' });
   return '{}';
 }

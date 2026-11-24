@@ -97,6 +97,10 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
   await import('../public/prompt/storyboard-mau.js');
   const ids = new Set(window.PROMPTS.map((p) => p.id));
   const sbs = new Set(window.SB_MAU.map((x) => x.id));
+  // Bản mẫu prompt phía máy chủ khớp Thư viện (chạy python3 tools/prompt-index.py sau khi cập nhật Thư viện)
+  const { PROMPT_LIB } = await import('../src/lib/prompt-lib.js');
+  assert.deepEqual(Object.keys(PROMPT_LIB).sort(), [...ids].sort(), 'src/lib/prompt-lib.js khớp public/prompt/data.js');
+  for (const p of window.PROMPTS) assert.equal(PROMPT_LIB[p.id].t, p.text.slice(0, 1500), `prompt ${p.id} khớp nội dung`);
   for (const tpl of Object.values(TEMPLATES)) for (const t of tpl.topics) for (const c of t.children) {
     for (const id of c.prompt_ids.split(',')) assert.ok(ids.has(id), `prompt ${id} có trong thư viện`);
     if (c.storyboard_id) assert.ok(sbs.has(c.storyboard_id), `storyboard ${c.storyboard_id} có trong thư viện`);

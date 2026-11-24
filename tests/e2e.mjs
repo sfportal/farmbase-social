@@ -768,6 +768,7 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.equal(draft.status, 'pending', 'bài trợ lý soạn luôn chờ duyệt');
   assert.ok(draft.ai_meta.reason && draft.ai_meta.check && draft.ai_meta.visual && draft.ai_meta.website?.title, JSON.stringify(draft.ai_meta));
   assert.ok(draft.message.startsWith('Bài viết thử của trợ lý AI'), draft.message);
+  assert.ok(draft.ai_meta.media_prompt?.includes('4:5'), 'bài trợ lý có prompt sẵn để tạo hình');
   assert.ok(draft.scheduled_at > nowS() + 3600, 'hẹn giờ ngày mai');
   r = await owner.req('/api/assistant/run', { method: 'POST', body: { page_id: '111', steps: ['drafts'] } });
   assert.ok(r.data.log.some((l) => /đã có bài/.test(l)), 'không soạn trùng ngày');
@@ -863,6 +864,19 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   assert.ok(r.data.brief.includes('TRỌNG TÂM'), 'hồ sơ Fanpage theo bộ mẫu mới');
   r = await owner.req('/api/media?page_id=111');
   assert.equal(r.data.items.find((x) => x.id === m1.id).topic_id, null, 'file vẫn còn, bỏ gắn chủ đề cũ');
+  // Đề xuất prompt mới cho Thư viện: duyệt thì thành Prompt bổ sung bs-01
+  r = await viewer.req('/api/assistant/prompts/suggest', { method: 'POST' });
+  assert.equal(r.status, 403);
+  r = await owner.req('/api/assistant/prompts/suggest', { method: 'POST' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/assistant?page_id=111');
+  assert.equal(r.data.prompt_suggestions.length, 1);
+  const ps = r.data.prompt_suggestions[0];
+  r = await owner.req(`/api/assistant/prompts/${ps.sid}/accept`, { method: 'POST' });
+  assert.equal(r.data.id, 'bs-01');
+  r = await owner.req('/api/assistant?page_id=111');
+  assert.equal(r.data.prompt_suggestions.length, 0);
+  assert.equal(r.data.prompt_extra[0].id, 'bs-01');
   step('kho ảnh, video theo Fanpage, chọn model Claude, tương tác 7/15/30 ngày, cân chỉnh tỷ trọng, thay bộ mẫu');
 }
 

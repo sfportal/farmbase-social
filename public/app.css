@@ -422,3 +422,23 @@ details.pfb textarea { margin: 6px 0; }
 .eng .row { margin-top: 10px; }
 .mfilter select, .mup select { max-width: 100%; min-width: 0; }
 .eng { margin-top: 16px; } .eng .grid.g3 { margin-top: 12px; }
+
+/* Menu chia nhóm */
+.nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
+.nav a { padding: 8px 12px; font-size: 14.5px; }
+.nav svg { width: 19px; height: 19px; }
+.nsec { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .55; padding: 14px 12px 4px; }
+.side .who { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; border-radius: 10px; }
+.side .who:hover, .side .who.on { background: rgba(255,255,255,.08); }
+.side .who svg { width: 22px; height: 22px; flex: none; opacity: .85; }
+.side .who > span { min-width: 0; display: flex; flex-direction: column; }
+.nav.sheet { color: var(--fg); }
+.nav.sheet .nsec { color: var(--muted); opacity: 1; }
+.nav.sheet a.on { background: var(--sprout); }
+.nav.sheet a:hover { background: var(--sprout); }
+.aiwhy svg, .aibadge svg { width: 15px; height: 15px; vertical-align: -3px; }
+.aibadge { display: inline-flex; align-items: center; gap: 4px; color: var(--forest); font-weight: 600; background: var(--sprout); padding: 1px 8px; border-radius: 999px; }
+@media (prefers-color-scheme: dark) { .aibadge { color: var(--leaf); } }
+.mprompt { background: var(--bg); border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 4px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
+.psug { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+.psug .row { margin-top: 8px; gap: 8px; }
