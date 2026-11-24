@@ -56,6 +56,7 @@ const ROUTES = [
   ['PUT', '/api/rules', writing.saveRules],
   ['POST', '/api/ai/write', writing.aiWrite],
   ['POST', '/api/ai/adapt', writing.aiAdapt],
+  ['POST', '/api/ai/media-prompt', assistant.aiMediaPrompt],
   ['GET', '/api/styles', writing.listStyles],
   ['PUT', '/api/styles/:id', writing.saveStyle],
   ['GET', '/api/fb/status', fb.fbStatus],

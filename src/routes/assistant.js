@@ -313,6 +313,76 @@ const MEDIA_GUIDE = `CÁCH VIẾT "media_prompt" (chi tiết, chuyên nghiệp, 
 8. Tránh: khuôn mặt người thật nhận diện được, giấy tờ cá nhân, số điện thoại, logo cơ quan nhà nước, chữ sai chính tả, hình méo.
 Video thì "storyboard" gồm 5–8 cảnh, mỗi dòng: "0–2s | hình ảnh và chuyển động máy | chữ trên màn hình | lời đọc | chuyển cảnh, âm thanh". Thêm dòng cuối: nhạc nền, giọng đọc, tổng thời lượng.`;
 
+// ---------- Tạo prompt hình ảnh, video từ nội dung bài (khung Soạn bài) ----------
+// Chọn mẫu trong Thư viện prompt hợp nhất với bài: cùng loại (ảnh/video), trùng từ khóa với tên và nội dung mẫu.
+const foldVi = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+const STOP = new Set(foldVi('và của cho các những một được trong với này đó khi thì là có không để từ trên theo bà con người tại cũng đã sẽ đang rất nhiều hơn nên cần như vào ra bạn chúng tôi mình hãy nhé farmbase bvi').split(/\s+/));
+const tokens = (s) => new Set(foldVi(s).split(/[^a-z0-9]+/).filter((w) => w.length >= 2 && !STOP.has(w) && !/^\d+$/.test(w)));
+export function pickMediaTemplates(lib, text, kind = 'image', campaign = false, n = 6) {
+  const want = tokens(text);
+  const scored = [];
+  for (const [id, x] of Object.entries(lib)) {
+    if (!x || x.k !== kind || /^(sx|st)-/.test(id)) continue;
+    if (!campaign && (id.startsWith('cd-') || /10\.?000\s*ha/i.test(`${x.n} ${String(x.t).slice(0, 400)}`))) continue;
+    const nameT = tokens(x.n), bodyT = tokens(String(x.t).slice(0, 700));
+    let s = 0;
+    for (const w of want) { if (nameT.has(w)) s += 3; else if (bodyT.has(w)) s += 1; }
+    scored.push([s, id]);
+  }
+  scored.sort((a, b) => b[0] - a[0]);
+  const top = scored.filter(([s]) => s > 0).slice(0, n).map(([, id]) => id);
+  const base = mediaTemplates(lib, { campaign, format: kind === 'video' ? 'video' : 'ảnh' }).filter((id) => lib[id]?.k === kind);
+  return [...new Set([...top, ...base])].slice(0, n);
+}
+const VIDEO_STORY = `VIDEO: viết thêm "storyline" là mạch truyện 3–5 câu (mở bằng câu móc của bài, diễn biến, cao trào, kết bằng lời kêu gọi; cảm xúc chủ đạo, nhân vật hoặc vật xuyên suốt), rồi "storyboard" 5–8 cảnh bám đúng storyline. "media_prompt" của video là prompt hoàn chỉnh để dán vào Claude dựng video bằng HTML/canvas: nêu thời lượng, khổ 9:16 (kèm 16:9 nếu hợp), nhịp nhạc, chữ trên màn hình lấy từ bài.`;
+// POST /api/ai/media-prompt { text, kind: image|video, page_ids[], note }
+export async function aiMediaPrompt(request, env, user) {
+  if (user.role === 'agent') throw new HttpError(403, 'Không có quyền', 'forbidden');
+  const body = await readJson(request);
+  const text = typeof body.text === 'string' ? body.text.trim().slice(0, 5000) : '';
+  if (text.length < 20) throw new HttpError(400, 'Viết nội dung bài trước rồi mới tạo prompt hình ảnh, video', 'empty');
+  const kind = body.kind === 'video' ? 'video' : 'image';
+  const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+  const allowed = await allowedPageIds(env, user);
+  const pageIds = (Array.isArray(body.page_ids) ? body.page_ids.map(String) : []).filter((p) => allowed.includes(p)).slice(0, 20);
+  const names = pageIds.length ? (await env.DB.prepare(`SELECT name FROM social_pages WHERE id IN (${pageIds.map(() => '?').join(',')})`).bind(...pageIds).all()).results.map((r) => r.name) : [];
+  const campaign = /10\.?000\s*ha/i.test(text) || names.some((x) => /10\.?000/.test(x));
+  const [lib, st] = await Promise.all([promptLibrary(env), getRules(env)]);
+  const ids = pickMediaTemplates(lib, text, kind, campaign);
+  if (!ids.length) throw new HttpError(500, 'Thư viện prompt chưa có mẫu phù hợp', 'no_template');
+  const prompt = `[VIEC:media] Bài Facebook dưới đây cần ${kind === 'video' ? 'một video ngắn (Reels)' : 'hình ảnh'} minh họa.${names.length ? ` Fanpage: ${names.join(', ')}.` : ''}
+
+BÀI VIẾT:
+${text}
+
+${MEDIA_ALIGN}
+
+${MEDIA_GUIDE}
+${kind === 'video' ? `\n${VIDEO_STORY}\n` : ''}${note ? `\nYÊU CẦU THÊM CỦA NGƯỜI SOẠN: ${note}\n` : ''}
+MẪU TRONG THƯ VIỆN PROMPT (chọn 1 mẫu hợp bài nhất, chỉ dùng phần kỹ thuật của mẫu):
+${tplBlock(lib, ids)}
+
+Trả JSON {"prompt_id":"mã mẫu đã chọn","why":"vì sao mẫu này hợp bài (1 câu)","visual":"tóm tắt ${kind === 'video' ? 'video' : 'hình'} cần làm (1–2 câu)","media_prompt":"8 mục như hướng dẫn"${kind === 'video' ? ',"storyline":"mạch truyện 3–5 câu","storyboard":"5–8 cảnh, mỗi dòng một cảnh"' : ''}}`;
+  const system = [
+    'Bạn là giám đốc sáng tạo của BVI và FarmBase, viết prompt tạo hình ảnh, video chuyên nghiệp bám sát bài đăng Fanpage.',
+    'Viết tiếng Việt có dấu. Không bịa số liệu, tên người, ngày tháng không có trong bài. Không nêu số hộ, diện tích, số vùng đã triển khai. Không viết FarmBase hay BVI "cấp mã". Không đưa CCCD, sổ đỏ, số điện thoại nông hộ hay khuôn mặt nhận diện được vào hình. Chiến dịch 10.000 ha: mọi con số là mục tiêu đề xuất.',
+    st.value ? `QUY ĐỊNH ĐĂNG BÀI CỦA DOANH NGHIỆP:\n${cut(st.value, 2500)}` : '',
+    'Chỉ trả đúng một đối tượng JSON hợp lệ, không giải thích thêm.',
+  ].filter(Boolean).join('\n\n');
+  const { text: out, provider } = await generate(env, { system, prompt, maxTokens: kind === 'video' ? 5000 : 3000 });
+  const r = parseJson(out) || {};
+  const mp = tidy(String(r.media_prompt || ''));
+  if (mp.length < 40) throw new HttpError(502, 'AI chưa trả về prompt, vui lòng thử lại', 'ai_empty');
+  const pid = ids.includes(r.prompt_id) ? r.prompt_id : ids[0];
+  const res = {
+    media_kind: kind, prompt_id: pid, prompt_name: lib[pid]?.n || '', why: cut(r.why, 300), visual: cut(r.visual, 600), media_prompt: mp.slice(0, 4000),
+    storyline: kind === 'video' ? tidy(String(r.storyline || '')).slice(0, 1500) : '', storyboard: kind === 'video' ? tidy(String(r.storyboard || '')).slice(0, 2500) : '',
+  };
+  const issues = ruleCheck(`${res.visual}\n${res.media_prompt}\n${res.storyline}\n${res.storyboard}`, { campaign });
+  await audit(env, request, user.id, 'ai_media_prompt', `${kind === 'video' ? 'Prompt video' : 'Prompt hình ảnh'} · ${pid}`.slice(0, 80));
+  return json({ ...res, candidates: ids.map((id) => ({ id, name: lib[id].n })), issues, provider: PROVIDER_LABELS[provider] });
+}
+
 async function draftContext(env, page, date, cfg) {
   const ws = weekStart(date);
   let plan = await loadPlan(env, page.id, ws);
@@ -591,7 +661,7 @@ export async function assistantState(request, env, user) {
   const wsNext = weekStart(tomorrow);
   const [plan, planNext, drafts] = await Promise.all([
     loadPlan(env, pid, wsNow), wsNext !== wsNow ? loadPlan(env, pid, wsNext) : null,
-    env.DB.prepare("SELECT c.id, c.message, c.status, c.scheduled_at, c.topic_id, c.ai_meta, c.created_at, c.reject_reason FROM social_content c WHERE c.page_id = ? AND c.ai_meta IS NOT NULL ORDER BY COALESCE(c.scheduled_at, c.created_at) DESC LIMIT 30").bind(pid).all(),
+    env.DB.prepare("SELECT c.id, c.message, c.status, c.scheduled_at, c.topic_id, c.ai_meta, c.created_at, c.reject_reason FROM social_content c WHERE c.page_id = ? AND c.ai_meta IS NOT NULL AND json_extract(c.ai_meta, '$.manual') IS NULL ORDER BY COALESCE(c.scheduled_at, c.created_at) DESC LIMIT 30").bind(pid).all(),
   ]);
   const month = new Date((t + VN) * 1000).toISOString().slice(0, 7);
   const usage = usageCost(await getSetting(env, `ai_usage:${month}`, {}));

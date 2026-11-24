@@ -717,6 +717,32 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req('/api/content', { method: 'POST', body: { message: '', messages: { 111: 'Bản cho A', 222: 'Bản cho B' }, page_ids: ['111', '222'], action: 'draft' } });
   assert.equal(r.status, 201, JSON.stringify(r.data));
   assert.deepEqual(r.data.items.map((i) => [i.page_id, i.message]).sort(), [['111', 'Bản cho A'], ['222', 'Bản cho B']]);
+  // Tạo prompt hình ảnh, video từ nội dung bài: chọn mẫu trong Thư viện prompt, video có storyline, lưu cùng bài
+  const qrPost = 'Một mã QR, xem cả hành trình vườn. Người mua quét QR là thấy vùng trồng, nhật ký canh tác và hình ảnh của lô sầu riêng.';
+  r = await viewer.req('/api/ai/media-prompt', { method: 'POST', body: { text: 'ngắn', kind: 'image' } });
+  assert.equal(r.status, 400, 'bài quá ngắn thì báo');
+  r = await viewer.req('/api/ai/media-prompt', { method: 'POST', body: { text: qrPost, kind: 'image', page_ids: ['222', '111'] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.prompt_id && r.data.candidates.some((c) => c.id === r.data.prompt_id), 'chọn một mẫu trong danh sách');
+  assert.ok(r.data.candidates.every((c) => !/^(cd|sx|st)-/.test(c.id)), 'không lấy mẫu 10.000 ha, khung sản xuất cho bài thường');
+  assert.ok(r.data.candidates.some((c) => ['tx-02', 'fb-03', 'tx-13'].includes(c.id) || /QR|truy xuất/i.test(c.name)), 'mẫu hợp bài QR truy xuất: ' + JSON.stringify(r.data.candidates));
+  assert.equal(r.data.media_kind, 'image'); assert.equal(r.data.storyline, '');
+  const img = r.data;
+  r = await viewer.req('/api/ai/media-prompt', { method: 'POST', body: { text: qrPost, kind: 'video', page_ids: ['222'] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.storyline && r.data.storyboard && r.data.media_prompt, 'video có storyline, storyboard');
+  const { PROMPT_LIB: LIB } = await import('../src/lib/prompt-lib.js');
+  assert.ok(r.data.candidates.every((c) => LIB[c.id].k === 'video'), 'video chỉ chọn mẫu video');
+  r = await owner.req('/api/content', { method: 'POST', body: { message: qrPost, page_ids: ['111'], action: 'draft', ai_media: { ...r.data, prompt_id: 'x' } } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const mpItem = r.data.items[0];
+  assert.ok(mpItem.ai.media_prompt && mpItem.ai.storyline && mpItem.ai.manual === 1 && mpItem.ai.prompt_id === '', 'lưu prompt cùng bài, bỏ mã mẫu sai');
+  r = await owner.req(`/api/content/${mpItem.id}`, { method: 'PATCH', body: { message: qrPost, ai_media: img } });
+  assert.equal(r.data.item.ai.media_kind, 'image'); assert.equal(r.data.item.ai.prompt_id, img.prompt_id);
+  r = await owner.req('/api/assistant?page_id=111');
+  assert.ok(!r.data.drafts.some((x) => x.id === mpItem.id), 'bài tự soạn có prompt không lẫn vào danh sách trợ lý AI');
+  r = await owner.req(`/api/content/${mpItem.id}`, { method: 'DELETE' });
+  assert.equal(r.status, 200);
   // Tổng quan: số liệu hộp thư theo Trang, đúng phân quyền
   r = await owner.req('/api/overview');
   assert.equal(r.status, 200);
@@ -1088,6 +1114,16 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.waitForFunction(() => document.querySelectorAll('.pvar').length === 2 && document.querySelector('[data-var="111"]').value.includes('Hotline A') && document.querySelector('[data-var="222"]').value.startsWith('Mời'));
   assert.equal(await page.inputValue('[data-var="222"]'), 'Mời bà con dự tập huấn\n\nHotline B: 0922 000 222\n\n#FarmBase #TrangB');
   await page.screenshot({ path: `test-output/${label}-soan-bai.png`, fullPage: true });
+  // Tạo prompt video từ nội dung bài: storyline, prompt, storyboard hiện trong khung soạn
+  await page.fill('#msg', 'Một mã QR, xem cả hành trình vườn. Người mua quét QR là thấy vùng trồng, nhật ký canh tác và hình ảnh của lô sầu riêng.');
+  await page.click('#mpbox summary');
+  await page.click('[data-mp="video"]');
+  await page.waitForSelector('[data-mpf="storyline"]');
+  assert.ok((await page.inputValue('[data-mpf="media_prompt"]')).length > 40, 'có prompt video');
+  const ovp = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(ovp <= 1, `${label} prompt video: tràn ngang ${ovp}px`);
+  await page.locator('#mpout').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `test-output/${label}-soan-bai-prompt-video.png` });
   await page.keyboard.press('Escape');
   await page.click('[data-c-approve]');
   await page.waitForSelector('#apf');

@@ -802,6 +802,12 @@ function contentForm(pages, item, perms, pre) {
             <div class="row"><label class="btn ghost sm upl">Tải ảnh, video lên<input id="mfile" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime" multiple hidden></label><button type="button" class="btn ghost sm" id="mlib">Chọn từ kho</button></div>
             <div class="muted small">Tối đa 10 ảnh (mỗi ảnh 10 MB) hoặc 1 video MP4 (95 MB). Có ảnh hoặc video thì nội dung làm chú thích.</div><div id="mmsg"></div></div>`
         : '<div class="muted small">Chưa bật kho lưu ảnh, video. Tạm thời dán đường dẫn ảnh công khai bên dưới.</div>'}
+      <details class="ai" id="mpbox" ${v.ai?.media_prompt ? 'open' : ''}><summary>✨ Tạo prompt hình ảnh, video từ nội dung bài</summary>
+        <div class="muted small">AI đọc nội dung bài, chọn mẫu phù hợp trong <a href="/prompt/" target="_blank" rel="noopener">Thư viện prompt</a>, rồi viết prompt hoàn chỉnh để Quý khách dán vào Claude tạo hình. Video có kèm storyline và storyboard.</div>
+        <input id="mpnote" maxlength="500" placeholder="Yêu cầu thêm (không bắt buộc), ví dụ: khổ 1:1, dùng ảnh chụp thật tại vườn" aria-label="Yêu cầu thêm cho prompt">
+        <div class="row ai-row"><button type="button" class="btn sm" data-mp="image">Tạo prompt hình ảnh</button><button type="button" class="btn sm" data-mp="video">Tạo prompt video</button></div>
+        <div id="mpout"></div>
+      </details>
       <label for="img">Hoặc địa chỉ ảnh có sẵn (không bắt buộc)</label><input id="img" type="url" placeholder="https://… .jpg" value="${esc(v.image_url || '')}">
       <label for="when">Thời gian đăng</label><input id="when" type="datetime-local" value="${toLocalInput(item?.scheduled_at)}">
       <div class="muted small">${editing && item.status === 'scheduled' ? 'Bài đang hẹn giờ trên Facebook: khi lưu, lịch cũ được thay bằng nội dung và giờ mới. Giờ đăng cách hiện tại ít nhất 10 phút.' : 'Để trống: đăng ngay khi duyệt. Hẹn giờ: cách hiện tại ít nhất 10 phút, tối đa 30 ngày; Facebook tự đăng đúng giờ.'}</div>
@@ -899,6 +905,51 @@ function openContentForm(pages, item, perms, pre) {
     };
     m.querySelector('#aigo').onclick = () => runAi(false);
     m.querySelector('#airew').onclick = () => runAi(true);
+    // Prompt hình ảnh, video từ nội dung bài (mẫu trong Thư viện prompt); lưu cùng bài khi bấm lưu.
+    const am0 = (item || pre)?.ai;
+    let aiMedia = am0?.media_prompt ? { media_kind: am0.media_kind || (am0.storyline || am0.storyboard ? 'video' : 'image'), prompt_id: am0.prompt_id || '', prompt_name: am0.prompt_name || '', visual: am0.visual || '', media_prompt: am0.media_prompt, storyline: am0.storyline || '', storyboard: am0.storyboard || '' } : null;
+    const mpout = m.querySelector('#mpout');
+    const readMp = () => {
+      if (!aiMedia) return null;
+      for (const k of ['media_prompt', 'storyline', 'storyboard']) { const t = mpout.querySelector(`[data-mpf="${k}"]`); if (t) aiMedia[k] = t.value; }
+      return aiMedia;
+    };
+    const mpCopy = async (txt) => { try { await navigator.clipboard.writeText(txt); toast('Đã sao chép'); } catch { toast('Không sao chép được, vui lòng chép tay'); } };
+    const drawMp = (extra = {}) => {
+      if (!aiMedia) { mpout.innerHTML = ''; return; }
+      const a = aiMedia, video = a.media_kind === 'video';
+      const ta = (k, label, rows) => `<div class="mpf"><div class="row between"><span class="muted small">${label}</span><button type="button" class="btn ghost sm" data-mpcp="${k}">Sao chép</button></div><textarea rows="${rows}" data-mpf="${k}">${esc(a[k] || '')}</textarea></div>`;
+      mpout.innerHTML = `<div class="mpres">
+        <div class="small"><b>${video ? 'Prompt video' : 'Prompt hình ảnh'}</b>${a.prompt_id ? ` · Mẫu gốc: <span class="tag">${esc(a.prompt_id)}${a.prompt_name ? ` · ${esc(a.prompt_name)}` : ''}</span>` : ''}</div>
+        ${extra.why ? `<div class="muted small">Vì sao chọn mẫu này: ${esc(extra.why)}</div>` : ''}
+        ${extra.candidates?.length ? `<div class="muted small">Mẫu đã cân nhắc: ${extra.candidates.map((c) => esc(c.id)).join(', ')}</div>` : ''}
+        ${a.visual ? `<div class="small">${esc(a.visual)}</div>` : ''}
+        ${(extra.issues || []).length ? `<div class="alert warn small">Cần xem lại: ${esc(extra.issues.join('; '))}</div>` : ''}
+        ${video ? ta('storyline', 'Storyline (mạch truyện)', 4) : ''}
+        ${ta('media_prompt', video ? 'Prompt dựng video (dán vào Claude)' : 'Prompt tạo hình (dán vào Claude)', 8)}
+        ${video ? ta('storyboard', 'Storyboard từng cảnh', 7) : ''}
+        <div class="row sact">${video ? '<button type="button" class="btn ghost sm" data-mpcp="all">Sao chép cả bộ</button>' : ''}<button type="button" class="btn ghost sm" data-mprm>Bỏ prompt này</button></div>
+        <div class="muted small">Prompt được lưu cùng bài khi bấm ${item?.status === 'scheduled' ? 'Lưu và cập nhật lịch' : 'Lưu nháp, Gửi duyệt hoặc Duyệt và đăng'}. Quý khách có thể sửa trực tiếp trong các ô trên.</div></div>`;
+      mpout.querySelectorAll('[data-mpcp]').forEach((b) => (b.onclick = () => {
+        const x = readMp(); const k = b.dataset.mpcp;
+        mpCopy(k === 'all' ? [`STORYLINE:\n${x.storyline}`, `PROMPT DỰNG VIDEO:\n${x.media_prompt}`, `STORYBOARD:\n${x.storyboard}`].join('\n\n') : x[k] || '');
+      }));
+      mpout.querySelector('[data-mprm]').onclick = () => { aiMedia = null; drawMp(); };
+    };
+    drawMp();
+    m.querySelectorAll('[data-mp]').forEach((b) => (b.onclick = async () => {
+      const kind = b.dataset.mp;
+      if (f.msg.value.trim().length < 20) { mpout.innerHTML = '<div class="alert err small">Viết nội dung bài trước rồi mới tạo prompt.</div>'; return; }
+      if (aiMedia && !(await confirmBox('Tạo prompt mới?', 'Prompt mới sẽ thay cho prompt đang có.', 'Tạo mới'))) return;
+      const all = m.querySelectorAll('[data-mp]'); all.forEach((x) => (x.disabled = true));
+      mpout.innerHTML = `<div class="muted small">AI đang chọn mẫu và viết prompt ${kind === 'video' ? 'video, storyline, storyboard' : 'hình ảnh'}, khoảng 15 đến 40 giây…</div>`;
+      try {
+        const d = await api('/api/ai/media-prompt', { method: 'POST', body: { text: f.msg.value, kind, page_ids: pickedPages(), note: m.querySelector('#mpnote').value } });
+        aiMedia = { media_kind: d.media_kind, prompt_id: d.prompt_id, prompt_name: d.prompt_name, visual: d.visual, media_prompt: d.media_prompt, storyline: d.storyline, storyboard: d.storyboard };
+        drawMp(d);
+      } catch (e) { mpout.innerHTML = `<div class="alert err small">${esc(e.message)}</div>`; }
+      all.forEach((x) => (x.disabled = false));
+    }));
     m.querySelectorAll('[data-act]').forEach((b) => (b.onclick = async () => {
       const act = b.dataset.act;
       const page_ids = pickedPages();
@@ -906,6 +957,8 @@ function openContentForm(pages, item, perms, pre) {
         message: f.msg.value, link: f.lnk.value.trim(), image_url: f.img.value.trim(), media_ids: media.map((x) => x.id),
         scheduled_at: f.when.value ? Math.floor(new Date(f.when.value).getTime() / 1000) : null,
       };
+      const am = readMp();
+      if (am?.media_prompt?.trim()) body.ai_media = am;
       const msgBox = m.querySelector('#fmsg');
       if (!item && !page_ids.length) { msgBox.innerHTML = '<div class="alert err">Vui lòng chọn ít nhất một Fanpage.</div>'; return; }
       if (act === 'reschedule') {
@@ -1012,6 +1065,7 @@ function contentCard(c, perms) {
       ${c.reject_reason ? `<div class="alert warn small">Lý do từ chối: ${esc(c.reject_reason)}</div>` : ''}
       ${c.status === 'failed' && c.last_error ? `<div class="alert err small">Facebook báo lỗi: ${esc(c.last_error)}</div>` : ''}
       ${c.ai?.reason ? `<div class="small aiwhy">${icon('ai')} ${esc(c.ai.topic_title ? `${c.ai.topic_title}: ` : '')}${esc(c.ai.reason)}${c.ai.check && !c.ai.check.ok ? ' <span class="badge warn">Cần xem lại</span>' : ''}</div>` : ''}
+      ${c.ai?.media_prompt ? `<details class="small cmp"><summary>${c.ai.media_kind === 'video' || c.ai.storyboard ? 'Prompt video' : 'Prompt hình ảnh'}${c.ai.prompt_id ? ` · mẫu ${esc(c.ai.prompt_id)}` : ''}</summary>${c.ai.storyline ? `<div class="muted small">Storyline</div><div class="pre small mprompt">${esc(c.ai.storyline)}</div>` : ''}<div class="pre small mprompt">${esc(c.ai.media_prompt)}</div>${c.ai.storyboard ? `<div class="muted small">Storyboard</div><div class="pre small mprompt">${esc(c.ai.storyboard)}</div>` : ''}<button type="button" class="btn ghost sm" data-c-mp="${c.id}">Sao chép</button></details>` : ''}
       <div class="muted small">Soạn: ${c.ai && !c.created_by_name ? `<span class="aibadge">${icon('ai')}Trợ lý AI</span>` : esc(c.created_by_name || '–')}${c.approved_by_name ? ` · Duyệt: ${esc(c.approved_by_name)}` : ''}</div>
       ${acts.length ? `<div class="row" style="margin-top:8px">${acts.join('')}</div>` : ''}
     </div></article>`;
@@ -1099,6 +1153,11 @@ async function loadCalendar() {
   const byId = Object.fromEntries(d.items.map((c) => [c.id, c]));
   const act = async (btn, fn, ok) => { btn.disabled = true; try { await fn(); toast(ok); loadCalendar(); } catch (e) { toast(e.message); btn.disabled = false; } };
   box.querySelectorAll('[data-c-edit]').forEach((b) => (b.onclick = () => openContentForm(calPages, byId[b.dataset.cEdit], perms)));
+  box.querySelectorAll('[data-c-mp]').forEach((b) => (b.onclick = async () => {
+    const a = byId[b.dataset.cMp]?.ai || {};
+    const txt = [a.storyline && `STORYLINE:\n${a.storyline}`, a.media_prompt, a.storyboard && `STORYBOARD:\n${a.storyboard}`].filter(Boolean).join('\n\n');
+    try { await navigator.clipboard.writeText(txt); toast('Đã sao chép prompt'); } catch { toast('Không sao chép được, vui lòng chép tay'); }
+  }));
   box.querySelectorAll('[data-c-submit]').forEach((b) => (b.onclick = () => act(b, () => api(`/api/content/${b.dataset.cSubmit}/submit`, { method: 'POST' }), 'Đã gửi duyệt')));
   box.querySelectorAll('[data-c-approve]').forEach((b) => (b.onclick = () => openApprove(byId[b.dataset.cApprove])));
   if (calState.focus) { const el = document.getElementById(`c-${calState.focus}`); calState.focus = null; if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 2000); } }
@@ -1879,7 +1938,7 @@ const ACTIONS = {
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
   post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', competitor_added: 'Thêm đối thủ', competitor_updated: 'Sửa đối thủ', competitor_removed: 'Xóa đối thủ', competitor_item_added: 'Lưu quảng cáo, bài đối thủ', competitor_item_removed: 'Xóa mục đối thủ', competitors_fetched: 'Cập nhật dữ liệu đối thủ', competitor_report: 'AI tổng hợp đối thủ', video_keywords_updated: 'Sửa từ khóa video tham khảo', videos_fetched: 'Lấy video tham khảo', video_added: 'Lưu video tham khảo', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
-  media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', prompt_accepted: 'Thêm prompt bổ sung', prompt_dismissed: 'Bỏ qua prompt đề xuất', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
+  media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', prompt_accepted: 'Thêm prompt bổ sung', prompt_dismissed: 'Bỏ qua prompt đề xuất', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài', ai_media_prompt: 'AI tạo prompt hình ảnh, video',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   topics_seeded: 'Nạp bộ chủ đề mẫu', topics_replaced: 'Thay bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
   knowledge_added: 'Nạp tài liệu', knowledge_updated: 'Sửa tài liệu kiến thức', knowledge_deleted: 'Xóa kiến thức', suggestion_accepted: 'Chấp nhận đề xuất chủ đề', suggestion_dismissed: 'Bỏ qua đề xuất chủ đề',
