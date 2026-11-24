@@ -23,6 +23,33 @@ export const CLAUDE_MODELS = { write: 'claude-sonnet-5-5', fast: 'claude-haiku-5
 export const PRICES = { 'claude-sonnet-5-5': [2, 10], 'claude-haiku-5-5': [0.1, 0.5], 'claude-opus-5-5': [5, 25] };
 export const claudeModel = (env, tier = 'write') => (tier === 'fast' ? env.CLAUDE_FAST_MODEL || CLAUDE_MODELS.fast : env.CLAUDE_MODEL || CLAUDE_MODELS.write);
 
+// Danh sách model Claude chọn được trên trang Trợ lý AI (cài đặt lưu trong social_settings 'ai_models').
+export const MODEL_CHOICES = [
+  { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5', note: 'Rẻ nhất, nhanh; viết bài ở mức khá' },
+  { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', note: 'Cân bằng chất lượng và chi phí (khuyên dùng để viết bài)' },
+  { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', note: 'Chất lượng cao nhất, đắt gấp khoảng 2,5 lần Sonnet' },
+];
+const VALID = new Set(MODEL_CHOICES.map((m) => m.id));
+
+// Model đang dùng: cài đặt trên trang Trợ lý AI, rồi biến CLAUDE_MODEL / CLAUDE_FAST_MODEL, rồi mặc định.
+export async function claudeModels(env) {
+  let saved = {};
+  try {
+    const row = env.DB ? await env.DB.prepare("SELECT value FROM social_settings WHERE key = 'ai_models'").first() : null;
+    saved = JSON.parse(row?.value || '{}') || {};
+  } catch { saved = {}; }
+  return {
+    write: VALID.has(saved.write) ? saved.write : claudeModel(env, 'write'),
+    fast: VALID.has(saved.fast) ? saved.fast : claudeModel(env, 'fast'),
+  };
+}
+
+// Ước tính chi phí (USD) cho một bài trợ lý: 1 lần viết (khoảng 4.000 token vào, 2.000 ra) và 1 lần tự kiểm tra (1.500 vào, 800 ra).
+export function costPerPost(write, fast) {
+  const pw = PRICES[write] || [2, 10], pf = PRICES[fast] || [0.1, 0.5];
+  return (4000 * pw[0] + 2000 * pw[1] + 1500 * pf[0] + 800 * pf[1]) / 1e6;
+}
+
 // Cộng dồn số token đã dùng theo tháng (giờ Việt Nam), để hiện chi phí ước tính.
 async function recordUsage(env, model, usage) {
   if (!env.DB || !usage) return;
@@ -54,7 +81,7 @@ export async function generate(env, { system, prompt, maxTokens = 1200, tier = '
     }
     if (provider === 'claude') {
       const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-      const model = claudeModel(env, tier);
+      const model = (await claudeModels(env))[tier === 'fast' ? 'fast' : 'write'];
       const res = await client.messages.create({
         model,
         max_tokens: maxTokens,

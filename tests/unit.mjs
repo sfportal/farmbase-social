@@ -70,6 +70,12 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
   assert.ok(ruleCheck('Gói Vàng 1,5 tỷ đồng', { campaign: true }).length >= 1, 'chặn chi phí tài trợ trên Fanpage chiến dịch');
   assert.ok(ruleCheck('Chiến dịch đã đạt 10.000 ha', { campaign: true }).length === 1);
   assert.ok(ruleCheck('Giải pháp số 1 cho bà con').length === 1);
+  assert.ok(ruleCheck('FarmBase có trên 1.500 nông hộ, khoảng 1.600 ha').length === 1, 'không nêu số hộ, diện tích đã triển khai');
+  assert.deepEqual(ruleCheck('FarmBase có trên 1.500 nông hộ', { stats: true }), [], 'được nêu khi người duyệt yêu cầu');
+  assert.deepEqual(ruleCheck('Hướng tới 10.000 ha và 20.000 hộ', { campaign: true }), [], 'mục tiêu chiến dịch được nêu');
+  assert.deepEqual(ruleCheck('Kế hoạch gồm 10 hội nghị'), [], 'không nhầm "hội nghị" với "hộ"');
+  assert.ok(ruleCheck('Mang theo CCCD và sổ đỏ').length === 1);
+  assert.ok(ruleCheck('Bà con ủy quyền cho HTX làm mã').length === 1);
   assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
   assert.deepEqual(parseJson('Đây là kết quả: {"posts":[{"x":"y"}]} xong'), { posts: [{ x: 'y' }] });
   assert.equal(parseJson('không có'), null);

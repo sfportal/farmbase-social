@@ -52,13 +52,18 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | POST | `/api/content/:id/approve` `{ page_ids?, scheduled_at? }`: duyệt, chọn lại Fanpage (một hoặc nhiều) và giờ đăng; `/reject`, `/cancel` | Chủ hệ thống, Quản lý |
 | POST | `/api/media?name=` (thân là file ảnh JPG/PNG/GIF/WEBP ≤ 10 MB hoặc video MP4/MOV ≤ 95 MB, lưu R2 `MEDIA`) | Mọi vai trò trừ Chăm sóc khách hàng |
 | GET | `/api/media/file/:key` (công khai, tên ngẫu nhiên, để Facebook tải về) | Công khai |
+| POST | `/api/media?name=&page_id=&topic_id=&source=upload\|ai&note=` gắn file vào kho của Fanpage, chủ đề con, ghi prompt đã dùng | Mọi vai trò trừ Chăm sóc khách hàng |
+| GET | `/api/media?page_id=&kind=&topic_id=&source=&q=` kho ảnh, video của Trang, kèm bài đang dùng file | Mọi vai trò trừ Chăm sóc khách hàng (Trang được giao) |
+| PATCH | `/api/media/:id` sửa tên, chủ đề, ghi chú | Mọi vai trò trừ Chăm sóc khách hàng |
+| DELETE | `/api/media/:id` xóa file chưa dùng trong bài nào | Chủ hệ thống, Quản lý |
+| PUT | `/api/assistant/models` `{ write, fast }` chọn model Claude (Haiku 5.5, Sonnet 5.5, Opus 5.5) | Chủ hệ thống |
 | GET, PUT | `/api/rules`: quy định đăng bài (văn phong cho AI) | Xem: mọi người · Sửa: Chủ hệ thống, Quản lý |
 | POST | `/api/ai/write` `{ brief, current?, length?, page_ids? }`: AI viết bài theo quy định (Claude nếu có `ANTHROPIC_API_KEY`, DeepSeek nếu có `DEEPSEEK_API_KEY`, nếu không dùng Workers AI `AI`) | Mọi vai trò trừ Chăm sóc khách hàng |
 | GET, POST | `/api/sources` `{ kind: website, url }` hoặc `{ kind: fanpage, page_id }`: nguồn nội dung (website tự tìm RSS, Atom, WordPress; Fanpage chỉ là Trang đã kết nối) | Mọi vai trò trừ Chăm sóc khách hàng |
 | GET | `/api/sources/:id/items`: bài viết (website), bài đăng và video (Fanpage) | Như trên |
 | GET, POST | `/api/topics?page_id=`: cây chủ đề (Trang chưa có chủ đề, tên khớp bộ mẫu thì tự nạp mẫu); thêm chủ đề `{ page_id, parent_id?, ... }` | Xem: trừ Chăm sóc khách hàng · Sửa: Chủ hệ thống, Quản lý, Biên tập |
 | PATCH, DELETE | `/api/topics/:id` | Sửa: như trên · Xóa: Chủ hệ thống, Quản lý |
-| POST | `/api/topics/seed` `{ page_id, template: 10000ha \| farmbase }` | Chủ hệ thống, Quản lý |
+| POST | `/api/topics/seed` `{ page_id, template: 10000ha \| farmbase, replace? }` (replace: thay toàn bộ chủ đề và hồ sơ Fanpage bằng bộ mẫu) | Chủ hệ thống, Quản lý |
 | PUT | `/api/topics/brief` `{ page_id, brief }`: hồ sơ Fanpage cho AI | Chủ hệ thống, Quản lý, Biên tập |
 | GET | `/api/topics/suggestions?page_id=`; POST `/api/topics/suggestions/:id/accept`, `/dismiss` | Như trên |
 | GET, POST | `/api/knowledge`: kho kiến thức (AI tóm tắt tài liệu bằng Claude Haiku); PATCH, DELETE `/api/knowledge/:id` | Như trên; xóa: Chủ hệ thống, Quản lý |

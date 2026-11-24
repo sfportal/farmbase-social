@@ -7,10 +7,11 @@
 import { HttpError, json, readJson, now } from '../lib/http.js';
 import { allowedPageIds, requireRole } from '../lib/auth.js';
 import { audit } from '../lib/audit.js';
-import { generate, parseJson, aiProvider, PROVIDER_LABELS, PRICES, claudeModel } from '../lib/ai.js';
+import { generate, parseJson, aiProvider, PROVIDER_LABELS, PRICES, claudeModels, MODEL_CHOICES, costPerPost } from '../lib/ai.js';
 import { getRules, getPageStyles, enforceStyle, tidy, ruleLimits } from './writing.js';
 import { loadTopics, getBrief } from './topics.js';
 import { fetchText, parseFeed, parseWp, parseNews } from './sources.js';
+import { pageEngagement, cachedEngagement } from './engagement.js';
 
 const VN = 7 * 3600;
 const DAY = 86400;
@@ -51,6 +52,7 @@ function pageCfg(settings, pageId, hasTopics) {
 
 // ---------- Ngữ cảnh gọn cho AI (tiết kiệm token: chỉ chủ đề con đang bật, tóm tắt kiến thức, tiêu đề bài gần đây) ----------
 async function pageContext(env, page) {
+  const eng = await cachedEngagement(env, page.id);
   const [topics, brief, know, recent] = await Promise.all([
     loadTopics(env, page.id),
     getBrief(env, page.id),
@@ -78,6 +80,7 @@ async function pageContext(env, page) {
     docs.length ? `KIẾN THỨC MỚI (chỉ dùng dữ kiện có ở đây hoặc trong "dữ kiện" của chủ đề):\n${docs.join('\n')}` : '',
     fb.length ? `GÓP Ý CỦA NGƯỜI DUYỆT (làm theo):\n${fb.join('\n')}` : '',
     rec.length ? `BÀI ĐÃ CÓ GẦN ĐÂY (tránh lặp lại góc viết):\n${rec.join('\n')}` : '',
+    eng?.text ? `${eng.text}\n(Học từ số liệu này: ưu tiên góc viết, định dạng của bài tương tác cao; giảm kiểu bài tương tác thấp; vẫn giữ tỷ trọng chủ đề.)` : '',
   ].filter(Boolean).join('\n\n');
   return { text, subs, topics };
 }
@@ -88,6 +91,7 @@ function assistantSystem(rules, page, note) {
     'Bạn là trợ lý biên tập nội dung Fanpage nông nghiệp tại Đắk Lắk. Viết tiếng Việt có dấu, rõ ràng, thực tế, gần gũi với bà con, chuyên nghiệp với doanh nghiệp.',
     'Mỗi bài phải có: câu móc (hook) cụ thể ở dòng đầu, một thông điệp rõ theo chủ đề con, và một câu kêu gọi hành động theo CTA của chủ đề (không kèm số điện thoại, website).',
     'Chỉ dùng dữ kiện có trong hồ sơ Fanpage, dữ kiện chủ đề và kiến thức được cung cấp. Không bịa số liệu, ngày, tên người, giá, cam kết. Thiếu dữ kiện thì viết chung, không tự thêm. Tránh câu sáo rỗng, chung chung.',
+    'Không nêu số nông hộ, diện tích (ha), số vùng trồng mà FarmBase hoặc BVI đã triển khai, trừ khi góp ý của người duyệt yêu cầu. Không nhắc CCCD, sổ đỏ, giấy tờ đất hay dữ liệu cá nhân của bà con, khách hàng. Tránh nội dung pháp lý như ủy quyền, tranh chấp đất, thủ tục pháp lý về mã số vùng trồng.',
     `Đoạn văn ngắn: mỗi đoạn tối đa 2 câu, các đoạn cách nhau một dòng trống. ${lim.maxEmoji !== null ? `Dùng ${lim.minEmoji ? `${lim.minEmoji} đến ` : 'tối đa '}${lim.maxEmoji} biểu tượng cảm xúc, không đặt liền nhau.` : 'Biểu tượng cảm xúc tiết chế.'}`,
     'Không viết số điện thoại, website, hashtag trong thân bài: hệ thống tự thêm phần cuối bài. Không dùng Markdown (**, #).',
     rules ? `QUY ĐỊNH ĐĂNG BÀI CỦA DOANH NGHIỆP (bắt buộc):\n${rules}` : '',
@@ -97,7 +101,7 @@ function assistantSystem(rules, page, note) {
 }
 
 // ---------- Kiểm tra cứng theo quy tắc nội dung (không tốn token) ----------
-export function ruleCheck(text, { campaign = false } = {}) {
+export function ruleCheck(text, { campaign = false, stats = false } = {}) {
   const issues = [];
   const t = String(text || '');
   if (/(BVI|FarmBase|chúng tôi|hệ thống|ứng dụng|app)[^.!?\n]{0,40}cấp mã/i.test(t) && !/thẩm quyền/i.test(t)) issues.push('Có ý BVI, FarmBase hoặc ứng dụng "cấp mã" (việc cấp mã thuộc thẩm quyền cơ quan nhà nước)');
@@ -106,6 +110,14 @@ export function ruleCheck(text, { campaign = false } = {}) {
   if (/\b(số 1|duy nhất|hàng đầu)\b/i.test(t)) issues.push('Dùng từ tuyệt đối "số 1", "duy nhất", "hàng đầu"');
   if (/(chắc chắn|cam kết|bảo đảm|đảm bảo|bao đậu)[^.!?\n]{0,25}(cấp mã|đầu ra|tăng giá|tăng năng suất|GACC)/i.test(t)) issues.push('Có lời hứa cấp mã, đầu ra, tăng giá hoặc năng suất');
   if (/~?\s?2\.000\s*(nông hộ|hộ)/i.test(t)) issues.push('Dùng số ~2.000 nông hộ (đúng là trên 1.500 nông hộ)');
+  // Không nêu số hộ, diện tích, số vùng FarmBase đã triển khai (trừ khi người duyệt yêu cầu). Fanpage chiến dịch được nêu mục tiêu 10.000 ha, 20.000 bà con.
+  if (!stats) {
+    const hits = [...t.matchAll(/(\d[\d.,]*)\s*(nông hộ|hộ dân|hộ|ha|hecta|héc-ta|vùng trồng|vùng)(?!\p{L})/giu)]
+      .filter((m) => !/^(10|20)\.?000$/.test(m[1])); // 10.000 ha, 20.000 bà con là mục tiêu Chiến dịch, không phải số đã triển khai
+    if (hits.length) issues.push(`Nêu số hộ, diện tích hoặc số vùng đã triển khai (${hits.slice(0, 3).map((m) => m[0]).join(', ')}): chỉ nêu khi được yêu cầu`);
+  }
+  if (/(CCCD|căn cước|chứng minh (nhân dân|thư)|sổ đỏ|sổ hồng|giấy chứng nhận quyền sử dụng đất)/i.test(t)) issues.push('Nhắc tới giấy tờ cá nhân (CCCD, sổ đỏ): hạn chế trong bài đăng');
+  if (/(ủy|uỷ)\s*quyền/i.test(t)) issues.push('Nhắc tới "ủy quyền" (nội dung pháp lý): tránh trong bài đăng');
   if (campaign) {
     if (/(8,2\s*tỷ|\d+\s*(tỷ|triệu)\s*(đồng)?|gói\s*(vàng|bạc|đồng|kim cương|bạch kim))/i.test(t)) issues.push('Có chi phí, gói tài trợ (không công khai trên Fanpage)');
     if (/(đã|vừa)\s*(đạt|hoàn thành|số hóa)[^.!?\n]{0,20}10\.000/i.test(t)) issues.push('Viết mục tiêu 10.000 ha như kết quả đã đạt');
@@ -128,9 +140,9 @@ function compose(st, style, body, source = '') {
 }
 
 // Tự kiểm tra một bài: quy tắc cứng trước, rồi Claude Haiku đối chiếu dữ kiện và quy định (rẻ). Lỗi thì nhận bản sửa.
-async function selfCheck(env, { body, sub, st, campaign }) {
+async function selfCheck(env, { body, sub, st, campaign, stats = false }) {
   let text = body;
-  let issues = ruleCheck(text, { campaign });
+  let issues = ruleCheck(text, { campaign, stats });
   let by = 'Quy tắc nội dung';
   if (aiProvider(env) && aiProvider(env) !== 'workers') {
     try {
@@ -144,10 +156,10 @@ async function selfCheck(env, { body, sub, st, campaign }) {
       if (Array.isArray(r.issues)) issues = [...new Set([...issues, ...r.issues.map((x) => cut(x, 160)).filter(Boolean)])].slice(0, 8);
       if (r.ok === false && typeof r.fixed === 'string' && r.fixed.trim().length > 40) {
         const fixed = tidy(r.fixed);
-        const left = ruleCheck(fixed, { campaign });
-        if (left.length < ruleCheck(text, { campaign }).length || !left.length) return { text: fixed, check: { ok: !left.length, issues, fixed: true, remaining: left, by } };
+        const left = ruleCheck(fixed, { campaign, stats });
+        if (left.length < ruleCheck(text, { campaign, stats }).length || !left.length) return { text: fixed, check: { ok: !left.length, issues, fixed: true, remaining: left, by } };
       }
-      if (r.ok === true && !ruleCheck(text, { campaign }).length) return { text, check: { ok: true, issues: [], by } };
+      if (r.ok === true && !ruleCheck(text, { campaign, stats }).length) return { text, check: { ok: true, issues: [], by } };
     } catch (e) { console.error('check', e?.message); }
   }
   return { text, check: { ok: !issues.length, issues, by } };
@@ -320,23 +332,33 @@ export async function suggestTopics(env, page, log = []) {
   const ctx = await pageContext(env, page);
   if (!ctx.subs.length) return log;
   const { results: know } = await env.DB.prepare("SELECT kind, title, digest, url FROM social_knowledge WHERE (page_id = ? OR page_id IS NULL) AND created_at >= ? ORDER BY created_at DESC LIMIT 15").bind(page.id, now() - 14 * DAY).all();
-  if (!know.length) { log.push(`${page.name}: chưa có kiến thức mới để đề xuất`); return log; }
-  const parents = ctx.topics.map((t) => `(id ${t.id}) ${t.title}`).join('; ');
+  let eng = null;
+  try { eng = await pageEngagement(env, page.id, { fresh: true }); } catch (e) { console.error('engagement', e?.message); }
+  if (!know.length && !eng?.text) { log.push(`${page.name}: chưa có kiến thức mới hay số liệu tương tác để đề xuất`); return log; }
+  const parents = ctx.topics.map((t) => `(id ${t.id}) ${t.title}: tỷ trọng ${t.share || 0}%`).join('; ');
   const { text } = await generate(env, {
     tier: 'fast', maxTokens: 3000,
-    system: 'Bạn là biên tập viên nội dung. Từ kiến thức mới, đề xuất tối đa 3 cập nhật cho kho chủ đề: thêm chủ đề con mới hoặc sửa chủ đề con đang có (bổ sung dữ kiện, hook, thông điệp). Chỉ đề xuất khi có dữ kiện cụ thể mới, không đề xuất chung chung. Tiếng Việt có dấu. Trả JSON.',
-    prompt: `[VIEC:suggest] Fanpage "${page.name}". Chủ đề cha: ${parents}\n\nChủ đề con hiện có:\n${ctx.subs.map((s) => `(id ${s.id}) ${s.title} | dữ kiện: ${cut(s.facts.replace(/\n/g, '; '), 200)}`).join('\n')}\n\nKIẾN THỨC MỚI:\n${know.map((k) => `- [${k.kind}] ${cut(k.title, 100)}: ${cut(k.digest, 250)}${k.url ? ` (${k.url})` : ''}`).join('\n')}\n\nTrả JSON {"suggestions":[{"action":"new|update","topic_id":"id chủ đề con nếu update","parent_id":"id chủ đề cha nếu new","title":"","hook":"","message":"","cta":"","facts":"dữ kiện mới, mỗi dòng một ý, kèm nguồn","keywords":"","reason":"vì sao nên cập nhật"}]}`,
+    system: 'Bạn là biên tập viên nội dung. Từ kiến thức mới và số liệu tương tác bài đã đăng (7, 15, 30 ngày), đề xuất tối đa 4 cập nhật cho kho chủ đề: thêm chủ đề con mới, sửa chủ đề con đang có (hook, thông điệp, CTA, dữ kiện, định dạng), hoặc cân chỉnh tỷ trọng chủ đề cha. Mỗi đề xuất phải dựa trên dữ kiện hoặc số liệu cụ thể, nêu rõ con số trong lý do. Ít bài (dưới 3 bài một chủ đề) thì chưa đủ để kết luận, nói rõ điều đó. Không đề xuất nội dung về số hộ, diện tích đã triển khai, CCCD, sổ đỏ, ủy quyền. Tiếng Việt có dấu. Trả JSON.',
+    prompt: `[VIEC:suggest] Fanpage "${page.name}". Chủ đề cha: ${parents}\n\nChủ đề con hiện có:\n${ctx.subs.map((s) => `(id ${s.id}) ${s.title} | dữ kiện: ${cut(s.facts.replace(/\n/g, '; '), 200)}`).join('\n')}\n\nKIẾN THỨC MỚI:\n${know.map((k) => `- [${k.kind}] ${cut(k.title, 100)}: ${cut(k.digest, 250)}${k.url ? ` (${k.url})` : ''}`).join('\n') || '(không có)'}\n\n${eng?.text || 'TƯƠNG TÁC: chưa có số liệu'}\n\nTrả JSON {"suggestions":[{"action":"new|update|share","topic_id":"id chủ đề con nếu update","parent_id":"id chủ đề cha nếu new","title":"","hook":"","message":"","cta":"","facts":"dữ kiện mới, mỗi dòng một ý, kèm nguồn","formats":"","keywords":"","shares":[{"topic_id":"id chủ đề cha","share":0}],"reason":"vì sao nên cập nhật, dẫn số liệu"}]}. Với action share: liệt kê tỷ trọng mới cho mọi chủ đề cha, tổng đúng 100.`,
   });
-  const list = (parseJson(text)?.suggestions || []).slice(0, 3);
+  const list = (parseJson(text)?.suggestions || []).slice(0, 4);
   const subIds = new Set(ctx.subs.map((s) => s.id));
   const parentIds = new Set(ctx.topics.map((t) => t.id));
   const t = now();
   const stmts = [];
   for (const s of list) {
+    if (s.action === 'share') {
+      // Cân chỉnh tỷ trọng: lưu dạng update gắn chủ đề cha đầu tiên, payload.shares là bảng tỷ trọng mới.
+      const shares = (Array.isArray(s.shares) ? s.shares : []).map((x) => ({ topic_id: Number(x.topic_id), share: Math.max(0, Math.min(100, Math.round(Number(x.share) || 0))) })).filter((x) => parentIds.has(x.topic_id));
+      if (!shares.length || shares.reduce((a, x) => a + x.share, 0) !== 100) continue;
+      stmts.push(env.DB.prepare("INSERT INTO social_topic_suggestions (page_id, topic_id, parent_id, action, payload, reason, created_at) VALUES (?, ?, NULL, 'update', ?, ?, ?)")
+        .bind(page.id, shares[0].topic_id, JSON.stringify({ shares: shares.map((x) => ({ ...x, title: ctx.topics.find((t) => t.id === x.topic_id)?.title || '', old: ctx.topics.find((t) => t.id === x.topic_id)?.share || 0 })) }), cut(s.reason, 500), now()));
+      continue;
+    }
     const action = s.action === 'update' && subIds.has(Number(s.topic_id)) ? 'update' : 'new';
     const parentId = action === 'new' ? (parentIds.has(Number(s.parent_id)) ? Number(s.parent_id) : ctx.topics[0]?.id) : null;
     const payload = {};
-    for (const k of ['title', 'hook', 'message', 'cta', 'facts', 'keywords']) if (s[k]) payload[k] = cut(s[k], 1500);
+    for (const k of ['title', 'hook', 'message', 'cta', 'facts', 'formats', 'keywords']) if (s[k]) payload[k] = cut(s[k], 1500);
     if (action === 'new' && !payload.title) continue;
     stmts.push(env.DB.prepare("INSERT INTO social_topic_suggestions (page_id, topic_id, parent_id, action, payload, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .bind(page.id, action === 'update' ? Number(s.topic_id) : null, parentId, action, JSON.stringify(payload), cut(s.reason, 400), t));
@@ -364,13 +386,19 @@ export async function runDaily(env, { pageIds = null, steps = ['learn', 'plan', 
     const cfg = pageCfg(settings, page.id, page.subs > 0);
     if (!page.subs || (!cfg.on && !force)) continue;
     try {
+      // Xem lại tương tác bài đã đăng (7, 15, 30 ngày) trước khi lập kế hoạch và soạn bài.
+      if (steps.includes('plan') || steps.includes('drafts')) { try { await pageEngagement(env, page.id); } catch (e) { console.error('engagement', e?.message); } }
       if (steps.includes('plan')) {
         const ws = weekStart(tomorrow);
         if (force || !(await loadPlan(env, page.id, ws))) { await makePlan(env, page, ws, cfg); log.push(`${page.name}: lập kế hoạch tuần ${ws}`); }
       }
       if (steps.includes('drafts')) await makeDrafts(env, page, tomorrow, cfg, log);
-      const monday = new Date(`${today}T00:00:00Z`).getUTCDay() === 1;
-      if (steps.includes('suggest') && (monday || force)) await suggestTopics(env, page, log);
+      // Đề xuất cân chỉnh chủ đề: sáng thứ Hai và thứ Năm (hoặc khi bấm "Đề xuất ngay"), bỏ qua nếu còn nhiều đề xuất chưa duyệt.
+      const wd = new Date(`${today}T00:00:00Z`).getUTCDay();
+      if (steps.includes('suggest') && ([1, 4].includes(wd) || force)) {
+        const pend = await env.DB.prepare("SELECT COUNT(*) AS n FROM social_topic_suggestions WHERE page_id = ? AND status = 'pending'").bind(page.id).first();
+        if (force || pend.n < 6) await suggestTopics(env, page, log); else log.push(`${page.name}: còn ${pend.n} đề xuất chưa duyệt, tạm chưa đề xuất thêm`);
+      }
     } catch (e) { log.push(`${page.name}: lỗi ${cut(e.message, 160)}`); }
   }
   settings.last_run = t;
@@ -419,14 +447,20 @@ export async function assistantState(request, env, user) {
   const month = new Date((t + VN) * 1000).toISOString().slice(0, 7);
   const usage = usageCost(await getSetting(env, `ai_usage:${month}`, {}));
   const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM social_topic_suggestions WHERE page_id = ? AND status = 'pending'").bind(pid).first();
+  let engagement = null;
+  try { engagement = await pageEngagement(env, pid); } catch (e) { engagement = { error: e.message, windows: [], topics: [], top: [], low: [] }; }
+  if (engagement) delete engagement.text;
   return json({
+    engagement,
     page, pages: pages.map((p) => ({ ...p, cfg: pageCfg(settings, p.id, p.subs > 0) })),
     cfg: pageCfg(settings, pid, page.subs > 0), today, tomorrow,
     plans: [plan, planNext].filter(Boolean),
     drafts: drafts.results.map((d) => ({ ...d, ai_meta: parseJson(d.ai_meta) || {} })),
     last_run: settings.last_run || null, last_log: settings.last_log || [],
     usage: { month, ...usage }, provider: PROVIDER_LABELS[aiProvider(env)] || null,
-    models: aiProvider(env) === 'claude' ? { write: claudeModel(env, 'write'), fast: claudeModel(env, 'fast') } : null,
+    models: aiProvider(env) === 'claude' ? await claudeModels(env) : null,
+    model_choices: MODEL_CHOICES.map((m) => ({ ...m, price: PRICES[m.id], per_post: Math.round(costPerPost(m.id, 'claude-haiku-5-5') * 10000) / 10000 })),
+    can_models: user.role === 'owner',
     pending_suggestions: pending.n,
     can_run: user.role === 'owner' || user.role === 'manager',
   });
@@ -503,13 +537,14 @@ export async function reviseDraft(request, env, user, id) {
   if (foot && cur.includes(foot)) cur = cur.replace(foot, '');
   if (st.contact && cur.includes(st.contact)) cur = cur.replace(st.contact, '');
   const body = enforceStyle(cur, { rules: st.value, strip: true });
+  const stats = /(số liệu|số hộ|nông hộ|hộ dân|diện tích|\bha\b|quy mô)/i.test(feedback);
   const src = (row.message.match(/^\s*Nguồn:\s*(\S+)\s*$/im) || [])[1] || '';
   const { text, provider } = await generate(env, {
     tier: 'write', maxTokens: 2500, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`,
-    prompt: `Viết lại bài dưới đây theo góp ý của người duyệt. Giữ dữ kiện đúng, không thêm số liệu mới. Chỉ trả về thân bài (không liên hệ, không hashtag).\n\nGÓP Ý: ${feedback}\n${sub ? `\nCHỦ ĐỀ CON: ${sub.title} | CTA: ${sub.cta}\n` : ''}\nBÀI HIỆN TẠI:\n${body}`,
+    prompt: `Viết lại bài dưới đây theo góp ý của người duyệt. Giữ dữ kiện đúng, không thêm số liệu mới${stats ? ' (được dùng số liệu triển khai có trong hồ sơ Fanpage vì người duyệt yêu cầu)' : ''}. Chỉ trả về thân bài (không liên hệ, không hashtag).\n\nGÓP Ý: ${feedback}\n${sub ? `\nCHỦ ĐỀ CON: ${sub.title} | CTA: ${sub.cta}\n` : ''}\nBÀI HIỆN TẠI:\n${body}`,
   });
   const revised = tidy(provider === 'fake' ? `${body}\n\n(Đã sửa theo góp ý: ${feedback})` : text);
-  const checked = await selfCheck(env, { body: enforceStyle(revised, { rules: st.value, strip: true }), sub, st, campaign: /10\.?000/.test(page.name) });
+  const checked = await selfCheck(env, { body: enforceStyle(revised, { rules: st.value, strip: true }), sub, st, campaign: /10\.?000/.test(page.name), stats });
   const message = compose(st, style, checked.text, src);
   const meta = parseJson(row.ai_meta) || {};
   meta.check = checked.check;
@@ -518,4 +553,16 @@ export async function reviseDraft(request, env, user, id) {
   await saveFeedback(env, page.id, feedback, user.id);
   await audit(env, request, user.id, 'ai_revised', cut(feedback, 80), { id: row.id });
   return json({ message, check: checked.check });
+}
+
+// PUT /api/assistant/models { write, fast }: chọn model Claude cho viết bài và cho việc nhanh (chỉ Chủ hệ thống)
+export async function saveModels(request, env, user) {
+  requireRole(user, 'owner');
+  const b = await readJson(request);
+  const ids = MODEL_CHOICES.map((m) => m.id);
+  if (!ids.includes(b.write) || !ids.includes(b.fast)) throw new HttpError(400, 'Model không hợp lệ', 'bad_model');
+  await env.DB.prepare("INSERT INTO social_settings (key, value, updated_by, updated_at) VALUES ('ai_models', ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at")
+    .bind(JSON.stringify({ write: b.write, fast: b.fast }), user.id, now()).run();
+  await audit(env, request, user.id, 'ai_models_updated', `${b.write} / ${b.fast}`);
+  return json({ models: { write: b.write, fast: b.fast } });
 }

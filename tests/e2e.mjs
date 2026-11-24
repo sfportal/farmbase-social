@@ -796,6 +796,76 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   step('chủ đề nội dung, bộ mẫu, kho kiến thức, trợ lý AI lập kế hoạch tuần, soạn bài chờ duyệt, tự kiểm tra, góp ý, đề xuất cập nhật, đúng quyền');
 }
 
+// 10g. Kho ảnh, video theo Fanpage; chọn model Claude; tương tác 7/15/30 ngày; cân chỉnh tỷ trọng; thay bộ mẫu
+{
+  const up = (who, q) => fetch(`${BASE}/api/media?${new URLSearchParams(q)}`, { method: 'POST', headers: { cookie: who.cookie, origin: BASE, 'content-type': 'image/png' }, body: png }).then(async (x) => ({ status: x.status, data: await x.json() }));
+  r = await owner.req('/api/topics?page_id=111');
+  const sub1 = r.data.topics[0].children[0].id;
+  r = await up(owner, { name: 'tem-qr.png', page_id: '111', topic_id: sub1, source: 'ai', note: 'prompt fb-03' });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const m1 = r.data.media;
+  assert.equal(m1.page_id, '111'); assert.equal(m1.topic_id, sub1); assert.equal(m1.source, 'ai');
+  r = await up(viewer, { name: 'x.png', page_id: '111' });
+  assert.equal(r.status, 404, 'không tải vào kho Trang không được giao');
+  r = await owner.req('/api/media?page_id=111');
+  assert.ok(r.data.items.some((x) => x.id === m1.id && x.topic_title && x.note === 'prompt fb-03'), JSON.stringify(r.data));
+  r = await viewer.req('/api/media?page_id=111');
+  assert.equal(r.status, 404, 'biên tập không xem kho Trang không được giao');
+  r = await owner.req('/api/media?page_id=111&source=ai');
+  assert.equal(r.data.items.length, 1);
+  r = await owner.req(`/api/media/${m1.id}`, { method: 'PATCH', body: { name: 'Tem QR sầu riêng', note: 'đã sửa' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/content', { method: 'POST', body: { page_ids: ['111'], message: 'Bài có ảnh từ kho', media_ids: [m1.id] } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  r = await owner.req('/api/media?page_id=111&q=Tem%20QR');
+  assert.equal(r.data.items[0].used.length, 1, 'biết file đang dùng ở bài nào');
+  r = await owner.req(`/api/media/${m1.id}`, { method: 'DELETE' });
+  assert.equal(r.status, 409, 'không xóa file đang dùng trong bài');
+  const m2 = (await up(owner, { name: 'xoa.png', page_id: '111' })).data.media;
+  r = await viewer.req(`/api/media/${m2.id}`, { method: 'DELETE' });
+  assert.equal(r.status, 403, 'biên tập không xóa file');
+  r = await owner.req(`/api/media/${m2.id}`, { method: 'DELETE' });
+  assert.equal(r.status, 200);
+  // Chọn model Claude (chỉ Chủ hệ thống)
+  r = await owner.req('/api/assistant/models', { method: 'PUT', body: { write: 'claude-haiku-5-5', fast: 'claude-haiku-5-5' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/assistant/models', { method: 'PUT', body: { write: 'gpt-5', fast: 'claude-haiku-5-5' } });
+  assert.equal(r.status, 400);
+  r = await viewer.req('/api/assistant/models', { method: 'PUT', body: { write: 'claude-opus-5-5', fast: 'claude-haiku-5-5' } });
+  assert.equal(r.status, 403);
+  r = await owner.req('/api/assistant?page_id=111');
+  assert.equal(r.data.model_choices.length, 3);
+  assert.ok(r.data.can_models);
+  // Tương tác bài đã đăng 7, 15, 30 ngày (Facebook giả)
+  assert.deepEqual(r.data.engagement.windows.map((w) => w.days), [7, 15, 30], JSON.stringify(r.data.engagement));
+  assert.ok(r.data.engagement.windows[2].posts >= 1, 'đọc được bài 30 ngày');
+  assert.ok(r.data.engagement.top.length >= 1);
+  // Đề xuất cân chỉnh tỷ trọng: chấp nhận thì đổi tỷ trọng chủ đề cha
+  const tops = (await owner.req('/api/topics?page_id=111')).data.topics;
+  const shares = tops.map((t, i) => ({ topic_id: t.id, share: i === 0 ? t.share + 5 : i === 1 ? t.share - 5 : t.share, title: t.title, old: t.share }));
+  sql(`INSERT INTO social_topic_suggestions (page_id, topic_id, action, payload, reason, created_at) VALUES ('111', ${tops[0].id}, 'update', '${JSON.stringify({ shares }).replace(/"/g, '\\"')}', 'thu', ${nowS()})`);
+  r = await owner.req('/api/topics/suggestions?page_id=111');
+  const sh = r.data.items.find((x) => Array.isArray(x.payload.shares));
+  assert.ok(sh, JSON.stringify(r.data));
+  r = await owner.req(`/api/topics/suggestions/${sh.id}/accept`, { method: 'POST' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/topics?page_id=111');
+  assert.equal(r.data.topics[0].share, tops[0].share + 5, 'đã cân chỉnh tỷ trọng');
+  // Thay bằng bộ mẫu mới nhất
+  r = await viewer.req('/api/topics/seed', { method: 'POST', body: { page_id: '222', template: 'farmbase', replace: true } });
+  assert.equal(r.status, 403);
+  r = await owner.req('/api/topics/seed', { method: 'POST', body: { page_id: '111', template: 'farmbase', replace: true } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/topics?page_id=111');
+  assert.equal(r.data.topics.length, 5);
+  assert.equal(r.data.topics[0].title, 'Truy xuất nguồn gốc: minh bạch từ gốc');
+  assert.equal(r.data.topics[0].share, 40);
+  assert.ok(r.data.brief.includes('TRỌNG TÂM'), 'hồ sơ Fanpage theo bộ mẫu mới');
+  r = await owner.req('/api/media?page_id=111');
+  assert.equal(r.data.items.find((x) => x.id === m1.id).topic_id, null, 'file vẫn còn, bỏ gắn chủ đề cũ');
+  step('kho ảnh, video theo Fanpage, chọn model Claude, tương tác 7/15/30 ngày, cân chỉnh tỷ trọng, thay bộ mẫu');
+}
+
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 mkdirSync('test-output', { recursive: true });
@@ -817,9 +887,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly', 'kho-media', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly'].includes(route) ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly', 'kho-media'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
@@ -922,6 +992,15 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   const ova = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(ova <= 1, `${label} trợ lý: tràn ngang ${ova}px`);
   await page.screenshot({ path: `test-output/${label}-tro-ly-111.png`, fullPage: true });
+  await page.goto(`${BASE}/#/kho-media`);
+  await page.waitForSelector('.mcard');
+  const ovmk = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(ovmk <= 1, `${label} kho ảnh: tràn ngang ${ovmk}px`);
+  await page.screenshot({ path: `test-output/${label}-kho-media.png`, fullPage: true });
+  await page.click('.mcard');
+  await page.waitForSelector('.modal .mprev');
+  await page.screenshot({ path: `test-output/${label}-kho-media-chi-tiet.png` });
+  await page.keyboard.press('Escape');
   await page.goto(`${BASE}/#/nhan-vien`);
   await page.waitForSelector('#view table'); // nút Thêm chỉ hoạt động sau khi tải xong danh sách
   await page.click('#add');

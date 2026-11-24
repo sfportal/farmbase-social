@@ -33,11 +33,12 @@ function shape(p, page) {
   };
 }
 
-async function fetchPagePosts(env, page, { limit, after }) {
+export async function fetchPagePosts(env, page, { limit, after, since }) {
   if (!page.access_token_enc) throw new HttpError(409, `Fanpage "${page.name}" chưa có mã truy cập, vui lòng kết nối lại`, 'no_token');
   const token = await decryptSecret(page.access_token_enc, env.TOKEN_KEY);
   const params = { access_token: token, fields: POST_FIELDS, limit: String(limit) };
   if (after) params.after = after;
+  if (since) params.since = String(since);
   try {
     const data = await graph(env, `${page.id}/posts`, params);
     return { posts: (data.data || []).map((p) => shape(p, page)), after: data.paging?.next ? data.paging?.cursors?.after || null : null };
