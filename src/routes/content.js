@@ -249,6 +249,13 @@ export async function approveContent(request, env, user, id) {
   }
   const items = [];
   for (const cid of ids) items.push(await publishItem(env, request, user, await loadItem(env, user, cid)));
+  // Trợ lý soạn 2 phương án cho một chỗ đăng: duyệt một phương án thì phương án còn lại tự chuyển sang "Từ chối".
+  let slot = null;
+  try { slot = JSON.parse(row.ai_meta || 'null')?.slot || null; } catch { slot = null; }
+  if (slot && items[0]?.status !== 'failed') {
+    await env.DB.prepare("UPDATE social_content SET status = 'rejected', reject_reason = 'Đã chọn phương án khác', updated_at = ? WHERE page_id = ? AND id != ? AND status IN ('pending', 'draft') AND json_extract(ai_meta, '$.slot') = ?")
+      .bind(now(), row.page_id, row.id, slot).run();
+  }
   return json({ item: items[0], items });
 }
 

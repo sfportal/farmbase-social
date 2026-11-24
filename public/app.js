@@ -1971,12 +1971,14 @@ function modelBox(a) {
   const usd = (n) => `${n.toLocaleString('vi-VN', { maximumFractionDigits: 4 })} USD`;
   const opts = (sel) => ch.map((c) => `<option value="${esc(c.id)}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}: ${esc(c.note)}</option>`).join('');
   const per = ch.find((c) => c.id === a.models.write)?.per_post;
-  const info = `<div class="small">Viết bài, kế hoạch tuần: <b>${esc(MODEL_NAME(a.models.write, ch))}</b> · Tóm tắt tin, tự kiểm tra, đề xuất: <b>${esc(MODEL_NAME(a.models.fast, ch))}</b></div>
-    ${per ? `<div class="muted small">Ước tính mỗi bài khoảng ${usd(per)}; 2 Trang, mỗi ngày 1 bài, cả tháng khoảng ${usd(Math.round(per * 60 * 100 + 30) / 100)} (đã gồm kế hoạch tuần).</div>` : ''}`;
+  const cheap = a.models.cheap === 'workers' ? 'Workers AI (miễn phí)' : 'Claude Haiku';
+  const info = `<div class="small">Viết bài, kế hoạch tuần, prompt hình: <b>${esc(MODEL_NAME(a.models.write, ch))}</b> · Tự kiểm tra, đề xuất: <b>${esc(MODEL_NAME(a.models.fast, ch))}</b> · Đọc tin báo hằng ngày: <b>${esc(cheap)}</b></div>
+    ${per ? `<div class="muted small">Ước tính mỗi bài khoảng ${usd(per)}. Mỗi ngày 2 phương án và 1 bài chia sẻ tin báo khoảng ${usd(Math.round(per * 2.5 * 10000) / 10000)}; 2 Trang cả tháng khoảng ${usd(Math.round(per * 2.5 * 60 * 100 + 30) / 100)} (đã gồm kế hoạch tuần).</div>` : ''}`;
   if (!a.can_models) return info;
   return `${info}<details class="pfb"><summary>Đổi model Claude</summary>
     <label for="mw">Viết bài, kế hoạch tuần</label><select id="mw">${opts(a.models.write)}</select>
-    <label for="mf">Việc nhanh (tóm tắt tin, tự kiểm tra, đề xuất)</label><select id="mf">${opts(a.models.fast)}</select>
+    <label for="mf">Việc nhanh (tự kiểm tra, đề xuất)</label><select id="mf">${opts(a.models.fast)}</select>
+    <label for="mc">Đọc, tóm tắt tin báo hằng ngày</label><select id="mc"><option value="workers" ${a.models.cheap === 'workers' ? 'selected' : ''}>Workers AI của Cloudflare: miễn phí, Claude kiểm lại khi đọc lỗi (khuyên dùng)</option><option value="claude" ${a.models.cheap === 'claude' ? 'selected' : ''}>Claude Haiku: chính xác hơn, tốn thêm chút ít</option></select>
     <div class="muted small">Giá tham khảo cho 1 triệu token (vào/ra): ${ch.map((c) => `${esc(c.name)} ${c.price[0]}/${c.price[1]} USD`).join(' · ')}. Khuyên dùng: Sonnet để viết bài, Haiku cho việc nhanh. Muốn tiết kiệm tối đa: chọn Haiku cho cả hai.</div>
     <button class="btn sm" id="msave2">Lưu model</button></details>`;
 }
@@ -2033,14 +2035,16 @@ async function viewAssistant() {
       ${p.website?.length ? `<h3>Gợi ý bài website tuần này</h3>${p.website.map((w) => `<div class="tf"><b>${esc(w.title)}</b><div class="small pre">${esc(w.outline)}</div></div>`).join('')}` : ''}
       ${a.can_run ? `<details class="pfb"><summary>Góp ý để AI lập lại kế hoạch tuần</summary><textarea rows="3" data-pfb="${esc(p.week_start)}" placeholder="Ví dụ: thứ Năm có tập huấn tại Krông Pắc, thêm bài thư mời; giảm bài kiến thức, tăng bài hình ảnh thật"></textarea><button class="btn sm" data-pfbgo="${esc(p.week_start)}">Lập lại kế hoạch</button></details>` : ''}
     </section>`).join('') || `<div class="card muted">Chưa có kế hoạch tuần. ${a.can_run ? 'Bấm "Chạy ngay" để trợ lý lập kế hoạch và soạn bài cho ngày mai.' : ''}</div>`;
-  const draftsHtml = a.drafts.length ? a.drafts.map((d) => {
+  const draftCard = (d) => {
     const m = d.ai_meta; const [lb, cls] = DSTATUS[d.status] || [d.status, 'off'];
     const chk = m.check || {};
-    return `<article class="card adraft" id="ad-${d.id}"><div class="row between"><div><span class="aibadge">${icon('ai')}Trợ lý AI</span> <span class="badge ${cls}">${lb}</span> <b>${esc(m.topic_title || 'Bài trợ lý')}</b> <span class="muted small">${m.parent_title ? `· ${esc(m.parent_title)}` : ''}</span></div>
+    const tag = m.kind === 'share' ? '<span class="badge share">Chia sẻ tin báo</span> ' : m.option ? `<span class="badge opt">Phương án ${esc(m.option)}</span> ` : '';
+    return `<article class="card adraft${m.kind === 'share' ? ' isshare' : ''}" id="ad-${d.id}"><div class="row between"><div><span class="aibadge">${icon('ai')}Trợ lý AI</span> ${tag}<span class="badge ${cls}">${lb}</span> <b>${esc(m.kind === 'share' ? m.share_title || 'Bài chia sẻ' : m.topic_title || 'Bài trợ lý')}</b> <span class="muted small">${m.angle ? `· ${esc(m.angle)}` : ''}${m.parent_title ? ` · ${esc(m.parent_title)}` : ''}</span></div>
         <span class="muted small">${d.scheduled_at ? `Hẹn ${fmtTime(d.scheduled_at)}` : ''}</span></div>
       <div class="adgrid"><div class="msg">${esc(d.message)}</div>
       <div class="admeta">
-        ${m.reason ? `<div class="tf"><div class="muted small">Vì sao nên đăng</div>${esc(m.reason)}</div>` : ''}
+        ${m.kind === 'share' && m.share_url ? `<div class="tf"><div class="muted small">Bài báo gốc${m.share_source ? ` (${esc(m.share_source)})` : ''}</div><a href="${esc(m.share_url)}" target="_blank" rel="noopener">${esc(m.share_title || m.share_url)}</a><div class="muted small">Đăng dạng chia sẻ liên kết: Facebook tự hiện ảnh, tiêu đề bài báo.</div></div>` : ''}
+        ${m.reason ? `<div class="tf"><div class="muted small">${m.kind === 'share' ? 'Vì sao chọn tin này' : 'Vì sao nên đăng'}</div>${esc(m.reason)}</div>` : ''}
         <div class="tf"><div class="muted small">Tự kiểm tra (${esc(chk.by || '')})</div>${chk.ok ? '<span class="badge ok">Đạt</span>' : `<span class="badge warn">Cần xem lại</span>`}${chk.fixed ? ' <span class="muted small">AI đã tự sửa</span>' : ''}${(chk.ok ? [] : chk.remaining?.length ? chk.remaining : chk.issues || []).map((x) => `<div class="small">• ${esc(x)}</div>`).join('')}</div>
         ${m.visual ? `<div class="tf"><div class="muted small">Hình ảnh, video cần làm</div>${esc(m.visual)}${m.prompt_id ? `<div>Mẫu gốc: ${promptChip(lib, m.prompt_id)}</div>` : ''}</div>` : ''}
         ${m.media_prompt ? `<div class="tf"><div class="row between"><span class="muted small">Prompt sẵn để tạo hình (dán vào Claude)</span><button type="button" class="btn ghost sm" data-cp="${d.id}">Sao chép</button></div><div class="pre small mprompt">${esc(m.media_prompt)}</div></div>` : ''}
@@ -2050,14 +2054,30 @@ async function viewAssistant() {
         ${(m.feedback || []).length ? `<div class="tf"><div class="muted small">Góp ý đã gửi</div>${m.feedback.map((f) => `<div class="small">• ${esc(f.text)}</div>`).join('')}</div>` : ''}
       </div></div>
       ${['draft', 'pending', 'rejected', 'failed'].includes(d.status) ? `<details class="pfb"><summary>Góp ý để AI viết lại</summary><textarea rows="2" data-rv="${d.id}" placeholder="Ví dụ: mở bài bằng câu hỏi, nhắc buổi tập huấn ngày 5/12, bớt biểu tượng"></textarea><button class="btn sm" data-rvgo="${d.id}">Viết lại</button></details>
-      <div class="row">${a.can_run ? `<button class="btn sm" data-appr="${d.id}">Duyệt, hẹn đăng ${d.scheduled_at ? fmtTime(d.scheduled_at) : ''}</button>` : ''}<button class="btn ghost sm" data-cedit="${d.id}">Sửa trong Lịch đăng</button>${a.can_run && d.status === 'pending' ? `<button class="btn ghost sm danger" data-rej="${d.id}">Từ chối</button>` : ''}</div>` : ''}
+      <div class="row">${a.can_run ? `<button class="btn sm" data-appr="${d.id}">${m.option ? `Chọn phương án ${esc(m.option)}, hẹn đăng` : 'Duyệt, hẹn đăng'} ${d.scheduled_at ? fmtTime(d.scheduled_at) : ''}</button>` : ''}<button class="btn ghost sm" data-cedit="${d.id}">Sửa trong Lịch đăng</button>${a.can_run && d.status === 'pending' ? `<button class="btn ghost sm danger" data-rej="${d.id}">Từ chối</button>` : ''}</div>` : ''}
     </article>`;
+  };
+  // Gom các phương án của cùng một chỗ đăng vào một khung để Quý khách so sánh và chọn 1.
+  const groups = [];
+  const gIdx = {};
+  for (const d of a.drafts) {
+    const k = d.ai_meta.slot;
+    if (k && gIdx[k] !== undefined) groups[gIdx[k]].push(d);
+    else { if (k) gIdx[k] = groups.length; groups.push([d]); }
+  }
+  const draftsHtml = groups.length ? groups.map((g) => {
+    if (g.length < 2) return draftCard(g[0]);
+    g.sort((x, y) => String(x.ai_meta.option).localeCompare(String(y.ai_meta.option)));
+    const open = g.filter((d) => ['pending', 'draft'].includes(d.status)).length;
+    return `<section class="optgrp"><div class="optgrp-h">${icon('ai')}<b>${g.length} phương án cho bài ${g[0].scheduled_at ? fmtTime(g[0].scheduled_at) : ''}</b><span class="muted small">${open > 1 ? 'Chọn 1 phương án để duyệt, phương án còn lại tự chuyển sang Từ chối.' : 'Đã chọn xong.'}</span></div>${g.map(draftCard).join('')}</section>`;
   }).join('') : '<div class="card muted">Chưa có bài nào do trợ lý soạn.</div>';
   v.innerHTML = `${topicsHint}
     <div class="grid ascfg"><div class="card"><h2>Chạy tự động</h2>
       <label class="check"><input type="checkbox" id="aon" ${cfg.on ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Mỗi sáng 7h00 soạn bài cho ngày mai (chờ Quý khách duyệt, không tự đăng)</label>
       <div class="row"><label for="aper" class="grow">Số bài mỗi ngày</label><select id="aper" class="sm" ${a.can_run ? '' : 'disabled'}><option value="1" ${cfg.per_day === 1 ? 'selected' : ''}>1 bài</option><option value="2" ${cfg.per_day === 2 ? 'selected' : ''}>2 bài</option></select></div>
       <div class="row"><label for="at1" class="grow">Giờ đăng gợi ý</label><input id="at1" type="time" value="${esc(cfg.times[0] || '19:30')}" ${a.can_run ? '' : 'disabled'}><input id="at2" type="time" value="${esc(cfg.times[1] || '11:30')}" ${a.can_run ? '' : 'disabled'}></div>
+      <div class="row"><label for="aopt" class="grow">Phương án cho mỗi bài</label><select id="aopt" class="sm" ${a.can_run ? '' : 'disabled'}><option value="2" ${cfg.options !== 1 ? 'selected' : ''}>2 phương án để chọn</option><option value="1" ${cfg.options === 1 ? 'selected' : ''}>1 phương án</option></select></div>
+      <label class="check"><input type="checkbox" id="ashare" ${cfg.share !== false ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Thêm 1 bài chia sẻ tin báo mỗi ngày (có nguồn, liên kết bài gốc)</label>
       <label class="check"><input type="checkbox" id="aweb" ${cfg.website ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Gợi ý thêm bài cho website</label>
       ${a.can_run ? '<div class="row"><button class="btn sm" id="asave">Lưu cài đặt</button><button class="btn ghost sm" id="arun">Chạy ngay</button></div>' : ''}
       <div class="muted small">Lần chạy gần nhất: ${a.last_run ? fmtTime(a.last_run) : 'chưa chạy'}</div>${a.last_log.length ? `<details><summary class="small">Nhật ký lần chạy</summary>${a.last_log.map((l) => `<div class="small">• ${esc(l)}</div>`).join('')}</details>` : ''}</div>
@@ -2065,7 +2085,7 @@ async function viewAssistant() {
       <div>AI đang dùng: <b>${esc(a.provider || 'chưa cài')}</b></div>
       ${a.models ? modelBox(a) : `<div class="muted small">${me.role === 'owner' ? 'Để dùng Claude: thêm biến bí mật ANTHROPIC_API_KEY trong Cloudflare (Worker farmbase-social, Settings, Variables and Secrets). Chưa có thì hệ thống dùng Workers AI miễn phí.' : ''}</div>`}
       <div class="stat"><span class="n">${usage.usd ? `~${usage.usd.toLocaleString('vi-VN')} USD` : '0 USD'}</span> <span class="muted small">ước tính tháng này${usage.rows.length ? ` · ${usage.rows.reduce((x, r) => x + r.calls, 0)} lượt gọi` : ''}</span></div>
-      <div class="muted small">Tiết kiệm: Haiku cho việc nhanh, Sonnet chỉ khi viết bài; AI chỉ đọc bản tóm tắt chủ đề và kiến thức; phần hướng dẫn cố định được cache; mỗi Trang 1 lần lập kế hoạch mỗi tuần và 1 lần soạn bài mỗi ngày.</div></div></div>
+      <div class="muted small">Claude điều phối: Sonnet viết bài và prompt hình, Haiku tự kiểm tra; Workers AI miễn phí đọc tin báo hằng ngày. AI chỉ đọc bản tóm tắt chủ đề và kiến thức; phần hướng dẫn cố định được cache; mỗi Trang 1 lần lập kế hoạch mỗi tuần.</div></div></div>
     ${engagementHtml(a)}
     <h2 class="sec">Bài trợ lý soạn</h2>${draftsHtml}
     ${promptsHtml(a)}
@@ -2082,7 +2102,7 @@ async function viewAssistant() {
     try { const r = await api('/api/assistant/prompts/suggest', { method: 'POST' }); toast(r.log?.slice(-1)[0] || 'Xong'); viewAssistant(); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Đề xuất prompt mới'; }
   });
   v.querySelector('#msave2')?.addEventListener('click', async () => {
-    try { await api('/api/assistant/models', { method: 'PUT', body: { write: v.querySelector('#mw').value, fast: v.querySelector('#mf').value } }); toast('Đã đổi model Claude'); viewAssistant(); } catch (e) { toast(e.message); }
+    try { await api('/api/assistant/models', { method: 'PUT', body: { write: v.querySelector('#mw').value, fast: v.querySelector('#mf').value, cheap: v.querySelector('#mc').value } }); toast('Đã đổi model Claude'); viewAssistant(); } catch (e) { toast(e.message); }
   });
   v.querySelector('#engsug')?.addEventListener('click', async (e) => {
     e.target.disabled = true; e.target.textContent = 'Đang phân tích…';
@@ -2090,7 +2110,7 @@ async function viewAssistant() {
   });
   const times = () => [v.querySelector('#at1').value, v.querySelector('#at2').value].filter(Boolean);
   v.querySelector('#asave')?.addEventListener('click', async () => {
-    try { await api('/api/assistant/settings', { method: 'PUT', body: { page_id: a.page.id, on: v.querySelector('#aon').checked, per_day: Number(v.querySelector('#aper').value), times: times(), website: v.querySelector('#aweb').checked } }); toast('Đã lưu cài đặt'); } catch (e) { toast(e.message); }
+    try { await api('/api/assistant/settings', { method: 'PUT', body: { page_id: a.page.id, on: v.querySelector('#aon').checked, per_day: Number(v.querySelector('#aper').value), times: times(), website: v.querySelector('#aweb').checked, options: Number(v.querySelector('#aopt').value), share: v.querySelector('#ashare').checked } }); toast('Đã lưu cài đặt'); } catch (e) { toast(e.message); }
   });
   v.querySelector('#arun')?.addEventListener('click', async (e) => {
     e.target.disabled = true; e.target.textContent = 'Đang chạy, khoảng 1 phút…';
@@ -2112,7 +2132,7 @@ async function viewAssistant() {
   v.querySelectorAll('[data-appr]').forEach((b) => (b.onclick = async () => {
     const d = byId[b.dataset.appr];
     const when = d.scheduled_at && d.scheduled_at > Date.now() / 1000 + 600 ? `hẹn đăng lúc ${fmtTime(d.scheduled_at)}` : 'đăng ngay';
-    if (!(await confirmBox('Duyệt bài?', `Bài sẽ được gửi lên Fanpage "${a.page.name}" và ${when}.`, 'Duyệt'))) return;
+    if (!(await confirmBox(d.ai_meta.option ? `Chọn phương án ${d.ai_meta.option}?` : 'Duyệt bài?', `Bài sẽ được gửi lên Fanpage "${a.page.name}" và ${when}.${d.ai_meta.option ? ' Phương án còn lại tự chuyển sang Từ chối.' : ''}`, 'Duyệt'))) return;
     b.disabled = true;
     try { const r = await api(`/api/content/${d.id}/approve`, { method: 'POST' }); toast(r.item.status === 'failed' ? `Facebook báo lỗi: ${r.item.last_error || ''}` : 'Đã duyệt và gửi lên Facebook'); viewAssistant(); } catch (e) { toast(e.message); b.disabled = false; }
   }));

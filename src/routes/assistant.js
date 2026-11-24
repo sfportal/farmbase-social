@@ -48,7 +48,8 @@ function pageCfg(settings, pageId, hasTopics) {
   const c = settings.pages?.[pageId] || {};
   const per = [1, 2].includes(c.per_day) ? c.per_day : 1;
   const times = Array.isArray(c.times) && c.times.length ? c.times.filter((t) => /^\d{2}:\d{2}$/.test(t)).slice(0, 2) : DEFAULT_TIMES;
-  return { on: c.on === undefined ? hasTopics : !!c.on, per_day: per, times: times.length ? times : DEFAULT_TIMES, website: c.website !== false };
+  // options: số phương án cho mỗi chỗ đăng (mặc định 2 để Quý khách chọn); share: thêm 1 bài chia sẻ tin báo mỗi ngày.
+  return { on: c.on === undefined ? hasTopics : !!c.on, per_day: per, times: times.length ? times : DEFAULT_TIMES, website: c.website !== false, options: c.options === 1 ? 1 : 2, share: c.share !== false };
 }
 
 // ---------- Ngữ cảnh gọn cho AI (tiết kiệm token: chỉ chủ đề con đang bật, tóm tắt kiến thức, tiêu đề bài gần đây) ----------
@@ -57,7 +58,8 @@ async function pageContext(env, page) {
   const [topics, brief, know, recent] = await Promise.all([
     loadTopics(env, page.id),
     getBrief(env, page.id),
-    env.DB.prepare("SELECT kind, title, digest, url FROM social_knowledge WHERE (page_id = ? OR page_id IS NULL) AND created_at >= ? ORDER BY created_at DESC LIMIT 14").bind(page.id, now() - 30 * DAY).all(),
+    // Tài liệu (doc) luôn dùng, không giới hạn ngày; tin tức và góp ý lấy 30 ngày gần nhất.
+    env.DB.prepare("SELECT kind, title, digest, url FROM social_knowledge WHERE (page_id = ? OR page_id IS NULL) AND (kind = 'doc' OR created_at >= ?) ORDER BY (kind = 'doc') DESC, created_at DESC LIMIT 20").bind(page.id, now() - 30 * DAY).all(),
     env.DB.prepare("SELECT message, topic_id FROM social_content WHERE page_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10").bind(page.id, now() - 21 * DAY).all(),
   ]);
   const subs = [];
@@ -72,7 +74,7 @@ async function pageContext(env, page) {
       lines.push(`- (id ${c.id}) ${c.title} | mục tiêu: ${cut(c.goal, 100)} | hook: ${cut(c.hook.split('\n')[0], 110)} | thông điệp: ${cut(c.message, 200)} | CTA: ${cut(c.cta, 100)} | dữ kiện: ${cut(c.facts.replace(/\n/g, '; '), 450)} | định dạng: ${cut(c.formats, 80)} | prompt: ${c.prompt_ids || '-'}`);
     }
   }
-  const docs = know.results.filter((k) => k.kind !== 'feedback').slice(0, 8).map((k) => `- [${k.kind === 'news' ? 'Tin' : 'Tài liệu'}] ${cut(k.title, 90)}: ${cut(k.digest, 260)}${k.url ? ` (Nguồn: ${k.url})` : ''}`);
+  const docs = know.results.filter((k) => k.kind !== 'feedback').slice(0, 12).map((k) => `- [${k.kind === 'news' ? 'Tin' : 'Tài liệu'}] ${cut(k.title, 90)}: ${cut(k.digest, k.kind === 'doc' ? 700 : 260)}${k.url ? ` (Nguồn: ${k.url})` : ''}`);
   const fb = know.results.filter((k) => k.kind === 'feedback').slice(0, 6).map((k) => `- ${cut(k.digest || k.title, 200)}`);
   const rec = recent.results.map((r) => `- ${cut(r.message.split('\n')[0], 90)}`);
   const text = [
@@ -215,22 +217,26 @@ export async function learnNews(env, log = []) {
   fresh.sort((a, b) => b.score - a.score || (b.date || 0) - (a.date || 0));
   const pick = fresh.slice(0, 6);
   if (!pick.length) { log.push('Không có tin mới khớp từ khóa chủ đề'); return log; }
-  const { text } = await generate(env, {
-    tier: 'fast', maxTokens: 2000,
+  const digestReq = (tier) => generate(env, {
+    tier, maxTokens: 2000,
     system: 'Bạn đọc tin tức nông nghiệp cho người viết Fanpage FarmBase và Chiến dịch 10.000 ha (Đắk Lắk). Tóm tắt dữ kiện cụ thể dùng được (ai, làm gì, ở đâu, khi nào, số liệu). Không thêm ý ngoài tin. Tiếng Việt có dấu.',
     prompt: `[VIEC:digest] Với mỗi tin, viết tóm tắt 1–2 câu và cho biết có liên quan đến mã số vùng trồng, truy xuất, sầu riêng, cà phê, HTX, xuất khẩu nông sản Tây Nguyên không. Trả JSON {"items":[{"n":1,"digest":"...","relevant":true}]}\n\n${pick.map((it, i) => `[TIN ${i + 1}] ${cut(it.title, 160)} — ${cut(it.summary, 320)} — ${it.publisher || it.source}`).join('\n')}`,
   });
-  const out = parseJson(text)?.items || [];
+  // Workers AI miễn phí đọc trước; trả sai định dạng thì nhờ Claude Haiku đọc lại.
+  let r = await digestReq('cheap').catch(() => null);
+  let out = parseJson(r?.text)?.items;
+  if (!Array.isArray(out) && r?.provider === 'workers') { r = await digestReq('fast'); out = parseJson(r.text)?.items; }
+  out = Array.isArray(out) ? out : [];
   const t = now();
   const stmts = [];
   for (const o of out) {
     const it = pick[Number(o.n) - 1];
     if (!it || o.relevant === false || !o.digest) continue;
     stmts.push(env.DB.prepare("INSERT INTO social_knowledge (page_id, kind, title, body, digest, url, created_at) VALUES (?, 'news', ?, ?, ?, ?, ?)")
-      .bind(it.page_id || null, cut(it.title, 200), cut(it.summary, 1500), cut(o.digest, 600), it.url, t));
+      .bind(it.page_id || null, cut(it.title, 200), cut(`${it.summary}${it.publisher || it.source ? `\nNguồn: ${it.publisher || it.source}` : ''}`, 1500), cut(o.digest, 600), it.url, t));
   }
   if (stmts.length) await env.DB.batch(stmts);
-  log.push(`Đã đọc ${items.length} tin, lưu ${stmts.length} tin liên quan vào kho kiến thức`);
+  log.push(`Đã đọc ${items.length} tin, lưu ${stmts.length} tin liên quan vào kho kiến thức (${r?.provider === 'workers' ? 'Workers AI' : 'Claude Haiku'})`);
   return log;
 }
 
@@ -276,68 +282,148 @@ async function loadPlan(env, pageId, ws) {
   return { ...(parseJson(r.body) || {}), week_start: ws, updated_at: r.updated_at };
 }
 
-// ---------- 3. Soạn bài cho một ngày ----------
-export async function makeDrafts(env, page, date, cfg, log = []) {
-  const done = await env.DB.prepare("SELECT COUNT(*) AS n FROM social_content WHERE page_id = ? AND json_extract(ai_meta, '$.date') = ?").bind(page.id, date).first();
-  if (done.n >= cfg.per_day) { log.push(`${page.name}: đã có bài cho ngày ${date}`); return []; }
+// Hướng dẫn viết prompt hình ảnh, video thật chi tiết (Quý khách dán thẳng vào Claude hoặc công cụ tạo hình).
+const MEDIA_GUIDE = `CÁCH VIẾT "media_prompt" (chi tiết, chuyên nghiệp, dán thẳng vào công cụ tạo hình; tiếng Việt, 150–320 chữ), theo đúng 8 mục, mỗi mục một dòng:
+1. Mục đích và khổ: loại (ảnh đơn, carousel, video ngắn), khổ 4:5 hoặc 1:1 hoặc 9:16, độ phân giải 1080 px.
+2. Chủ thể và bối cảnh: cảnh cụ thể tại Đắk Lắk (vườn sầu riêng, cà phê, nhà sơ chế, điện thoại quét QR...), thời điểm, cảm xúc.
+3. Bố cục: tiền cảnh, trung cảnh, hậu cảnh; vị trí chữ (vùng an toàn 10% mép); điểm nhìn chính.
+4. Chữ trên hình (tiếng Việt có dấu, ghi trong ngoặc kép): tiêu đề tối đa 8 chữ, 1 dòng phụ, nhãn hoặc nút CTA; không ghi số điện thoại.
+5. Màu và kiểu chữ: xanh FarmBase #084C46, xanh lá tươi #2E9E5B, vàng nhấn #F2B705, nền sáng; font không chân đậm cho tiêu đề.
+6. Phong cách, ánh sáng, chất liệu: ví dụ ảnh chụp thật ánh nắng sớm, ống kính 35 mm, chiều sâu trường ảnh nông; hoặc minh họa phẳng 3D nhẹ; hoặc mockup điện thoại.
+7. Hiệu ứng: hiệu ứng thiết kế trong mẫu thư viện (parallax, glassmorphism, đường dẫn hành trình, nhãn nổi, ánh sáng viền...) phù hợp nội dung.
+8. Tránh: khuôn mặt người thật nhận diện được, giấy tờ cá nhân, số điện thoại, logo cơ quan nhà nước, chữ sai chính tả, hình méo.
+Video thì "storyboard" gồm 5–8 cảnh, mỗi dòng: "0–2s | hình ảnh và chuyển động máy | chữ trên màn hình | lời đọc | chuyển cảnh, âm thanh". Thêm dòng cuối: nhạc nền, giọng đọc, tổng thời lượng.`;
+
+async function draftContext(env, page, date, cfg) {
   const ws = weekStart(date);
   let plan = await loadPlan(env, page.id, ws);
-  if (!plan) { plan = await makePlan(env, page, ws, cfg); log.push(`${page.name}: đã lập kế hoạch tuần ${ws}`); }
-  const st = await getRules(env);
-  const style = (await getPageStyles(env, [page.id]))[page.id] || {};
-  const ctx = await pageContext(env, page);
-  const day = plan.days?.find((d) => d.date === date) || { posts: [] };
-  const want = cfg.per_day - done.n;
-  const slots = (day.posts || []).slice(done.n, done.n + want);
-  while (slots.length < want) slots.push({ topic_id: ctx.subs[slots.length % ctx.subs.length]?.id, angle: '', time: cfg.times[slots.length] || DEFAULT_TIMES[0] });
-  const byId = Object.fromEntries(ctx.subs.map((s) => [s.id, s]));
-  const campaign = /10\.?000/.test(page.name);
-  // Mẫu prompt trong Thư viện cho từng chỗ (mã trong kế hoạch, rồi mã của chủ đề con): AI chỉnh thành prompt hoàn chỉnh để Quý khách tự tạo hình.
-  const lib = await promptLibrary(env);
-  const tplIds = [...new Set(slots.flatMap((s) => [s.prompt_id, ...(byId[s.topic_id]?.prompt_ids || '').split(',')].filter((id) => id && lib[id]).slice(0, 2)))].slice(0, 4);
-  const tplText = tplIds.map((id) => `[${id}] ${lib[id].n} (${lib[id].k === 'video' ? 'video' : lib[id].k === 'image' ? 'ảnh' : 'tài liệu'}):\n${cut(lib[id].t, 700)}`).join('\n\n');
-  const prompt = `[VIEC:draft] Viết ${slots.length} bài Facebook cho ngày ${date} (${weekday(date)}) trên Fanpage "${page.name}" theo kế hoạch:
-${slots.map((s, i) => `${i + 1}. (id ${s.topic_id}) ${byId[s.topic_id]?.title || ''} | góc bài: ${s.angle || 'tự chọn theo chủ đề'} | định dạng: ${s.format || byId[s.topic_id]?.formats || ''} | hình: ${s.visual || ''}`).join('\n')}
-Mỗi bài 80 đến 180 chữ, mở bằng hook cụ thể, kết bằng câu kêu gọi theo CTA của chủ đề con.
-${tplText ? `MẪU PROMPT TRONG THƯ VIỆN (chọn 1 mẫu hợp nhất cho mỗi bài, chỉnh theo nội dung bài):\n${tplText}` : `Prompt có thể chọn (theo chủ đề): ${[...new Set(slots.flatMap((s) => (byId[s.topic_id]?.prompt_ids || '').split(',').filter(Boolean)))].join(', ') || '-'}.`}
-Trả JSON {"posts":[{"topic_id":0,"hook":"câu móc","message":"thân bài hoàn chỉnh (gồm hook ở đầu, không gồm liên hệ và hashtag)","visual":"hình ảnh hoặc video cần thiết kế: kích thước, bố cục, chữ trên ảnh","prompt_id":"mã mẫu prompt đã chọn","media_prompt":"prompt hoàn chỉnh, dán thẳng vào Claude hoặc công cụ tạo ảnh/video: dựa trên mẫu đã chọn, thay nội dung theo bài, ghi rõ khổ (4:5, 9:16...), bố cục, chữ trên hình bằng tiếng Việt có dấu, màu xanh FarmBase; không dùng ảnh người thật, không lộ tên, số điện thoại bà con","storyboard":"nếu là video: 4–6 dòng 'giây | hình | chữ trên màn hình | lời đọc', không phải video thì để trống","reason":"vì sao nên đăng bài này hôm đó (1–2 câu)","source":"link nguồn nếu dùng tin tức, không thì để trống"${cfg.website ? ',"website":{"title":"tiêu đề bài website dưới 60 ký tự","outline":"dàn ý 3–5 ý"}' : ''}}]}`;
-  const { text, provider } = await generate(env, { tier: 'write', maxTokens: 6000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
-  const out = parseJson(text);
-  let posts = Array.isArray(out?.posts) ? out.posts : Array.isArray(out) ? out : out?.message ? [out] : [];
-  // AI trả JSON bị cắt hoặc chỉ trả văn bản: vẫn lấy được thân bài cho chỗ đầu tiên.
-  if (!posts.length) {
-    const m = String(text).match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)/);
-    const msg = m ? m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') : (!/^\s*[{[]/.test(text) ? text : '');
-    if (msg.trim().length > 80) posts = [{ topic_id: slots[0].topic_id, message: msg, reason: slots[0].why || 'Bám kế hoạch tuần' }];
-  }
-  if (!posts.length) console.error('assistant draft: AI trả về không đọc được', String(text).slice(0, 500));
-  if (!posts.length) throw new HttpError(502, `AI chưa trả về bài hợp lệ, vui lòng thử lại (AI trả: ${cut(text, 160) || 'rỗng'})`, 'ai_bad');
-  const created = [];
+  let planned = false;
+  if (!plan) { plan = await makePlan(env, page, ws, cfg); planned = true; }
+  const [st, styles, ctx, lib] = await Promise.all([getRules(env), getPageStyles(env, [page.id]), pageContext(env, page), promptLibrary(env)]);
+  return { plan, planned, st, style: styles[page.id] || {}, ctx, lib, campaign: /10\.?000/.test(page.name), byId: Object.fromEntries(ctx.subs.map((s) => [s.id, s])) };
+}
+
+async function insertDraft(env, page, { message, at, topicId, meta, link = null }) {
   const t = now();
-  for (let i = 0; i < Math.min(posts.length, slots.length); i++) {
-    const p = posts[i];
-    const slot = slots[i];
-    const sub = byId[Number(p.topic_id)] || byId[slot.topic_id] || null;
-    const raw = tidy(String(p.message || '')).slice(0, 4000);
-    if (raw.length < 40) continue;
-    const source = /^https?:\/\//.test(p.source || '') ? String(p.source).slice(0, 500) : '';
-    const checked = await selfCheck(env, { body: enforceStyle(raw, { rules: st.value, strip: true }), sub, st, campaign });
-    const message = compose(st, style, checked.text, source);
-    const meta = {
-      date, by: 'assistant', provider: PROVIDER_LABELS[provider], hook: cut(p.hook, 200), visual: cut(p.visual || slot.visual, 600),
-      prompt_id: /^[a-z]{2}-\d{2}$/.test(p.prompt_id || '') ? p.prompt_id : (sub?.prompt_ids || '').split(',')[0] || '',
-      media_prompt: cut(p.media_prompt, 2500), storyboard: cut(p.storyboard, 1500), storyboard_id: sub?.storyboard_id || '', reason: cut(p.reason || slot.why, 500),
-      angle: slot.angle || '', check: checked.check, website: cfg.website && p.website?.title ? { title: cut(p.website.title, 90), outline: cut(p.website.outline, 800) } : null,
-      ads: sub?.ads ? cut(sub.ads, 400) : '', topic_title: sub?.title || '', parent_title: sub?.parent_title || '',
-    };
-    const at = Math.max(tsAt(date, slot.time || cfg.times[i] || DEFAULT_TIMES[0]), t + 3600);
-    const row = await env.DB.prepare(
-      "INSERT INTO social_content (page_id, message, scheduled_at, status, topic_id, ai_meta, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?) RETURNING id"
-    ).bind(page.id, message, at, sub?.id || null, JSON.stringify(meta), t, t).first();
-    created.push(row.id);
+  const row = await env.DB.prepare(
+    "INSERT INTO social_content (page_id, message, link, scheduled_at, status, topic_id, ai_meta, created_at, updated_at) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?) RETURNING id"
+  ).bind(page.id, message, link, at, topicId || null, JSON.stringify(meta), t, t).first();
+  return row.id;
+}
+
+// ---------- 3. Soạn bài ngày mai: mỗi chỗ đăng 2 phương án (A, B) để chọn, cộng 1 bài chia sẻ tin báo ----------
+export async function makeDrafts(env, page, date, cfg, log = []) {
+  // Đếm số chỗ đăng đã soạn (mỗi chỗ có thể có 2 phương án); bài chia sẻ tin báo tính riêng.
+  const done = await env.DB.prepare(
+    "SELECT COUNT(DISTINCT COALESCE(json_extract(ai_meta, '$.slot'), id)) AS n FROM social_content WHERE page_id = ? AND json_extract(ai_meta, '$.date') = ? AND COALESCE(json_extract(ai_meta, '$.kind'), '') != 'share'"
+  ).bind(page.id, date).first();
+  const want = Math.max(0, cfg.per_day - done.n);
+  const created = [];
+  let d = null;
+  if (want) {
+    d = await draftContext(env, page, date, cfg);
+    if (d.planned) log.push(`${page.name}: đã lập kế hoạch tuần ${weekStart(date)}`);
+    const { plan, st, style, ctx, lib, campaign, byId } = d;
+    const day = plan.days?.find((x) => x.date === date) || { posts: [] };
+    const slots = (day.posts || []).slice(done.n, done.n + want);
+    while (slots.length < want) slots.push({ topic_id: ctx.subs[(done.n + slots.length) % ctx.subs.length]?.id, angle: '', time: cfg.times[done.n + slots.length] || DEFAULT_TIMES[0] });
+    const nOpt = cfg.options || 2;
+    for (let i = 0; i < slots.length; i++) {
+      const slot = slots[i];
+      const idx = done.n + i + 1;
+      const sub0 = byId[slot.topic_id];
+      // Mẫu prompt trong Thư viện cho chỗ này (mã trong kế hoạch, rồi mã của chủ đề con): AI chỉnh thành prompt hoàn chỉnh.
+      const tplIds = [...new Set([slot.prompt_id, ...(sub0?.prompt_ids || '').split(',')].filter((id) => id && lib[id]))].slice(0, 3);
+      const tplText = tplIds.map((id) => `[${id}] ${lib[id].n} (${lib[id].k === 'video' ? 'video' : lib[id].k === 'image' ? 'ảnh' : 'tài liệu'}):\n${cut(lib[id].t, 900)}`).join('\n\n');
+      const optLine = nOpt > 1
+        ? `Viết ${nOpt} PHƯƠNG ÁN khác hẳn nhau để người duyệt chọn 1: phương án A theo góc bài trong kế hoạch; phương án B đổi góc tiếp cận (ví dụ kể chuyện thật, hỏi đáp, số liệu so sánh, mẹo nhanh, hậu trường) và đổi định dạng hình hoặc video nếu hợp. Hai phương án phải khác hook, khác cách mở bài, khác hình.`
+        : 'Viết 1 phương án tốt nhất.';
+      const prompt = `[VIEC:draft] Soạn bài Facebook cho ngày ${date} (${weekday(date)}) trên Fanpage "${page.name}", chỗ đăng ${idx} lúc ${slot.time || cfg.times[idx - 1] || DEFAULT_TIMES[0]}:
+(id ${slot.topic_id}) ${sub0?.title || ''} | góc bài: ${slot.angle || 'tự chọn theo chủ đề'} | định dạng: ${slot.format || sub0?.formats || ''} | hình: ${slot.visual || ''}
+${optLine}
+Mỗi bài 90 đến 190 chữ: dòng đầu là hook cụ thể gây tò mò hoặc chạm nỗi lo thật của bà con, doanh nghiệp; thân bài 2–4 đoạn ngắn có ý cụ thể dùng được ngay; kết bằng câu kêu gọi theo CTA của chủ đề con. Ưu tiên dữ kiện trong tài liệu, kho kiến thức.
+${tplText ? `MẪU PROMPT TRONG THƯ VIỆN (chọn mẫu hợp nhất cho từng phương án, chỉnh theo nội dung bài):\n${tplText}` : ''}
+${MEDIA_GUIDE}
+Trả JSON {"posts":[{"option":"A","topic_id":0,"angle":"góc tiếp cận 3–8 chữ","hook":"câu móc","message":"thân bài hoàn chỉnh (gồm hook ở đầu, không gồm liên hệ và hashtag)","visual":"tóm tắt hình ảnh hoặc video cần làm (1–2 câu)","prompt_id":"mã mẫu prompt đã chọn","media_prompt":"8 mục như hướng dẫn","storyboard":"nếu là video; không thì để trống","reason":"vì sao phương án này hiệu quả hôm đó (1–2 câu, có thể dựa vào tương tác)","source":"link nguồn nếu dùng tin tức, không thì để trống"${cfg.website && i === 0 ? ',"website":{"title":"tiêu đề bài website dưới 60 ký tự","outline":"dàn ý 3–5 ý"}' : ''}}]}`;
+      const { text, provider } = await generate(env, { tier: 'write', maxTokens: 3500 * nOpt, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
+      const out = parseJson(text);
+      let posts = Array.isArray(out?.posts) ? out.posts : Array.isArray(out) ? out : out?.message ? [out] : [];
+      // AI trả JSON bị cắt hoặc chỉ trả văn bản: vẫn lấy được thân bài đầu tiên.
+      if (!posts.length) {
+        const m = String(text).match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)/);
+        const msg = m ? m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\') : (!/^\s*[{[]/.test(text) ? text : '');
+        if (msg.trim().length > 80) posts = [{ topic_id: slot.topic_id, message: msg, reason: slot.why || 'Bám kế hoạch tuần' }];
+      }
+      if (!posts.length) { console.error('assistant draft: AI trả về không đọc được', String(text).slice(0, 500)); if (!created.length && i === slots.length - 1) throw new HttpError(502, `AI chưa trả về bài hợp lệ, vui lòng thử lại (AI trả: ${cut(text, 160) || 'rỗng'})`, 'ai_bad'); continue; }
+      const key = `${date}#${idx}`;
+      const at = Math.max(tsAt(date, slot.time || cfg.times[idx - 1] || DEFAULT_TIMES[0]), now() + 3600);
+      const opts = posts.slice(0, nOpt);
+      for (let j = 0; j < opts.length; j++) {
+        const p = opts[j];
+        const sub = byId[Number(p.topic_id)] || sub0 || null;
+        const raw = tidy(String(p.message || '')).slice(0, 4000);
+        if (raw.length < 40) continue;
+        const source = /^https?:\/\//.test(p.source || '') ? String(p.source).slice(0, 500) : '';
+        const checked = await selfCheck(env, { body: enforceStyle(raw, { rules: st.value, strip: true }), sub, st, campaign });
+        const meta = {
+          date, by: 'assistant', provider: PROVIDER_LABELS[provider], slot: key, option: opts.length > 1 ? String.fromCharCode(65 + j) : '', options: opts.length,
+          hook: cut(p.hook, 200), visual: cut(p.visual || slot.visual, 600),
+          prompt_id: /^[a-z]{2}-\d{2}$/.test(p.prompt_id || '') ? p.prompt_id : (sub?.prompt_ids || '').split(',')[0] || '',
+          media_prompt: cut(p.media_prompt, 4000), storyboard: cut(p.storyboard, 2500), storyboard_id: sub?.storyboard_id || '', reason: cut(p.reason || slot.why, 500),
+          angle: cut(p.angle, 80) || slot.angle || '', check: checked.check, website: cfg.website && p.website?.title ? { title: cut(p.website.title, 90), outline: cut(p.website.outline, 800) } : null,
+          ads: sub?.ads ? cut(sub.ads, 400) : '', topic_title: sub?.title || '', parent_title: sub?.parent_title || '',
+        };
+        created.push(await insertDraft(env, page, { message: compose(st, style, checked.text, source), at, topicId: sub?.id, meta }));
+      }
+    }
+    log.push(`${page.name}: soạn ${created.length} bài (${slots.length} chỗ đăng${nOpt > 1 ? `, mỗi chỗ ${nOpt} phương án` : ''}) cho ${weekday(date)} ${date}, chờ duyệt`);
+  } else log.push(`${page.name}: đã có bài cho ngày ${date}`);
+  if (cfg.share) {
+    try { const id = await makeShare(env, page, date, cfg, d, log); if (id) created.push(id); } catch (e) { log.push(`${page.name}: bài chia sẻ tin lỗi ${cut(e.message, 120)}`); }
   }
-  log.push(`${page.name}: soạn ${created.length} bài cho ${weekday(date)} ${date}, chờ duyệt`);
   return created;
+}
+
+// Bài chia sẻ tin báo: chọn 1 tin trong kho kiến thức (10 ngày gần nhất, chưa chia sẻ), Claude viết lời dẫn, gắn liên kết bài gốc.
+async function makeShare(env, page, date, cfg, d, log) {
+  const has = await env.DB.prepare("SELECT id FROM social_content WHERE page_id = ? AND json_extract(ai_meta, '$.date') = ? AND json_extract(ai_meta, '$.kind') = 'share' LIMIT 1").bind(page.id, date).first();
+  if (has) return null;
+  const [{ results: news }, { results: used }] = await Promise.all([
+    env.DB.prepare("SELECT id, title, digest, body, url FROM social_knowledge WHERE kind = 'news' AND url IS NOT NULL AND url != '' AND (page_id = ? OR page_id IS NULL) AND created_at >= ? ORDER BY created_at DESC LIMIT 15").bind(page.id, now() - 10 * DAY).all(),
+    env.DB.prepare("SELECT json_extract(ai_meta, '$.share_url') AS u FROM social_content WHERE page_id = ? AND json_extract(ai_meta, '$.kind') = 'share' AND created_at >= ?").bind(page.id, now() - 60 * DAY).all(),
+  ]);
+  const seen = new Set(used.map((u) => u.u));
+  const cands = news.filter((n) => /^https?:\/\//.test(n.url) && !seen.has(n.url)).slice(0, 8);
+  if (!cands.length) { log.push(`${page.name}: chưa có tin báo mới phù hợp để chia sẻ`); return null; }
+  d ||= await draftContext(env, page, date, cfg);
+  const { st, style, ctx, campaign } = d;
+  const pub = (n) => ((n.body || '').match(/Nguồn:\s*(.+)\s*$/m) || [])[1] || (() => { try { return new URL(n.url).hostname.replace(/^www\./, ''); } catch { return ''; } })();
+  const prompt = `[VIEC:share] Chọn 1 tin hợp nhất với Fanpage "${page.name}" để chia sẻ ngày ${date} (${weekday(date)}), rồi viết lời dẫn chia sẻ.
+Tiêu chí chọn: liên quan trực tiếp chủ đề của Trang (truy xuất nguồn gốc, mã số vùng trồng, sầu riêng, cà phê, HTX, xuất khẩu nông sản Tây Nguyên), mới, có ích cho bà con hoặc doanh nghiệp. Tránh tin tiêu cực về cá nhân, tin chính trị, tin có tranh chấp pháp lý.
+Lời dẫn 60 đến 120 chữ, viết bằng lời của Trang (không chép câu của báo): dòng đầu là hook nêu điểm đáng chú ý nhất; 1–2 đoạn tóm tắt ý chính chỉ theo nội dung tin; 1 đoạn "Góc nhìn" nối tin với việc bà con nên làm hoặc với chủ đề của Trang; kết bằng câu mời đọc bài gốc hoặc để lại ý kiến. Không bịa số liệu ngoài tin.
+TIN CÓ THỂ CHỌN:
+${cands.map((n, i) => `[TIN ${i + 1}] ${cut(n.title, 160)} — ${cut(n.digest, 360)} — báo: ${pub(n)}`).join('\n')}
+Trả JSON {"pick":1,"topic_id":0,"hook":"câu móc","message":"lời dẫn hoàn chỉnh (không gồm liên kết, nguồn, liên hệ, hashtag)","reason":"vì sao chọn tin này (1 câu)"}`;
+  const { text, provider } = await generate(env, { tier: 'write', maxTokens: 1500, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
+  const out = parseJson(text) || {};
+  const n = cands[Math.max(0, Math.min(cands.length - 1, Number(out.pick) - 1 || 0))];
+  const raw = tidy(String(out.message || '')).slice(0, 2500);
+  if (raw.length < 40) { log.push(`${page.name}: AI chưa viết được lời dẫn chia sẻ`); return null; }
+  const sub = d.byId[Number(out.topic_id)] || null;
+  const checked = await selfCheck(env, { body: enforceStyle(raw, { rules: st.value, strip: true }), sub, st, campaign });
+  const source = `${pub(n) ? `${pub(n)} - ` : ''}${n.url}`;
+  const meta = {
+    date, by: 'assistant', kind: 'share', provider: PROVIDER_LABELS[provider], share_url: n.url, share_title: cut(n.title, 200), share_source: pub(n),
+    hook: cut(out.hook, 200), reason: cut(out.reason, 400) || 'Tin báo mới liên quan chủ đề của Trang', check: checked.check,
+    visual: 'Bài chia sẻ liên kết: Facebook tự hiện ảnh và tiêu đề bài báo, không cần làm hình.', topic_title: sub?.title || '', parent_title: sub?.parent_title || '',
+  };
+  // Giờ chia sẻ: 2 tiếng trước bài chính đầu tiên (mặc định 17:30), không trùng giờ bài chính.
+  const main = cfg.times[0] || DEFAULT_TIMES[0];
+  const [hh, mm] = main.split(':').map(Number);
+  const shareTime = `${String(Math.max(7, hh - 2)).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  const id = await insertDraft(env, page, { message: compose(st, style, checked.text, source), at: Math.max(tsAt(date, shareTime), now() + 3600), topicId: sub?.id, meta, link: n.url });
+  log.push(`${page.name}: soạn 1 bài chia sẻ tin "${cut(n.title, 60)}"`);
+  return id;
 }
 
 // ---------- 4. Đề xuất cập nhật chủ đề ----------
@@ -519,7 +605,7 @@ export async function saveAssistantSettings(request, env, user) {
   settings.pages[pid] = {
     on: !!b.on, per_day: Number(b.per_day) === 2 ? 2 : 1,
     times: (Array.isArray(b.times) ? b.times : []).filter((x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x)).slice(0, 2),
-    website: b.website !== false,
+    website: b.website !== false, options: Number(b.options) === 1 ? 1 : 2, share: b.share !== false,
   };
   await putSetting(env, 'assistant', settings, user.id);
   await audit(env, request, user.id, 'assistant_settings', pid, settings.pages[pid]);
@@ -581,20 +667,40 @@ export async function reviseDraft(request, env, user, id) {
   const body = enforceStyle(cur, { rules: st.value, strip: true });
   const stats = /(số liệu|số hộ|nông hộ|hộ dân|diện tích|\bha\b|quy mô)/i.test(feedback);
   const src = (row.message.match(/^\s*Nguồn:\s*(\S+)\s*$/im) || [])[1] || '';
+  const meta = parseJson(row.ai_meta) || {};
+  const share = meta.kind === 'share';
   const { text, provider } = await generate(env, {
-    tier: 'write', maxTokens: 2500, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`,
-    prompt: `Viết lại bài dưới đây theo góp ý của người duyệt. Giữ dữ kiện đúng, không thêm số liệu mới${stats ? ' (được dùng số liệu triển khai có trong hồ sơ Fanpage vì người duyệt yêu cầu)' : ''}. Chỉ trả về thân bài (không liên hệ, không hashtag).\n\nGÓP Ý: ${feedback}\n${sub ? `\nCHỦ ĐỀ CON: ${sub.title} | CTA: ${sub.cta}\n` : ''}\nBÀI HIỆN TẠI:\n${body}`,
+    tier: 'write', maxTokens: 5000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`,
+    prompt: `[VIEC:revise] Viết lại bài dưới đây theo góp ý của người duyệt. Giữ dữ kiện đúng, không thêm số liệu mới${stats ? ' (được dùng số liệu triển khai có trong hồ sơ Fanpage vì người duyệt yêu cầu)' : ''}.
+${sub ? `CHỦ ĐỀ CON HIỆN TẠI: (id ${sub.id}) ${sub.title} | CTA: ${sub.cta}` : 'Bài chưa gắn chủ đề con: chọn chủ đề con hợp nhất trong danh sách (ghi đúng id).'}
+GÓP Ý: ${feedback}
+
+BÀI HIỆN TẠI:
+${body}
+${share ? '' : `\nHÌNH ĐANG ĐỀ XUẤT: ${cut(meta.visual, 400) || '-'}\n\n${MEDIA_GUIDE}\nCập nhật hình và prompt cho khớp bài mới.`}
+Trả JSON {"topic_id":0,"message":"thân bài mới (không liên hệ, không hashtag${share ? ', không liên kết' : ''})","reason":"vì sao bài mới hiệu quả hơn (1–2 câu)"${share ? '' : ',"visual":"tóm tắt hình hoặc video","prompt_id":"mã mẫu prompt","media_prompt":"8 mục như hướng dẫn","storyboard":"nếu là video"'}}`,
   });
-  const revised = tidy(provider === 'fake' ? `${body}\n\n(Đã sửa theo góp ý: ${feedback})` : text);
+  const r = parseJson(text) || {};
+  const newBody = typeof r.message === 'string' && r.message.trim().length > 40 ? r.message : (!/^\s*[{[]/.test(text) && text.trim().length > 40 ? text : '');
+  const revised = tidy(provider === 'fake' || !newBody ? `${body}\n\n(Đã sửa theo góp ý: ${feedback})` : newBody);
   const checked = await selfCheck(env, { body: enforceStyle(revised, { rules: st.value, strip: true }), sub, st, campaign: /10\.?000/.test(page.name), stats });
   const message = compose(st, style, checked.text, src);
-  const meta = parseJson(row.ai_meta) || {};
   meta.check = checked.check;
+  // Cập nhật luôn phần giải thích, hình và prompt theo bài mới (trước đây chỉ đổi thân bài nên thông tin cũ bị lệch).
+  const nsub = ctx.subs.find((x) => x.id === Number(r.topic_id)) || sub;
+  meta.topic_title = nsub?.title || '';
+  meta.parent_title = nsub?.parent_title || '';
+  if (r.reason) meta.reason = cut(r.reason, 500);
+  if (!share && r.visual) meta.visual = cut(r.visual, 600);
+  if (!share && r.media_prompt) meta.media_prompt = cut(r.media_prompt, 4000);
+  if (!share && typeof r.storyboard === 'string') meta.storyboard = cut(r.storyboard, 2500);
+  if (!share && /^[a-z]{2}-\d{2}$/.test(r.prompt_id || '')) meta.prompt_id = r.prompt_id;
+  if (nsub) meta.storyboard_id = nsub.storyboard_id || meta.storyboard_id || '';
   meta.feedback = [...(meta.feedback || []), { text: feedback, at: now() }].slice(-5);
-  await env.DB.prepare('UPDATE social_content SET message = ?, ai_meta = ?, updated_at = ? WHERE id = ?').bind(message, JSON.stringify(meta), now(), row.id).run();
+  await env.DB.prepare('UPDATE social_content SET message = ?, topic_id = ?, ai_meta = ?, updated_at = ? WHERE id = ?').bind(message, nsub?.id || null, JSON.stringify(meta), now(), row.id).run();
   await saveFeedback(env, page.id, feedback, user.id);
   await audit(env, request, user.id, 'ai_revised', cut(feedback, 80), { id: row.id });
-  return json({ message, check: checked.check });
+  return json({ message, check: checked.check, ai_meta: meta });
 }
 
 // PUT /api/assistant/models { write, fast }: chọn model Claude cho viết bài và cho việc nhanh (chỉ Chủ hệ thống)
@@ -603,10 +709,11 @@ export async function saveModels(request, env, user) {
   const b = await readJson(request);
   const ids = MODEL_CHOICES.map((m) => m.id);
   if (!ids.includes(b.write) || !ids.includes(b.fast)) throw new HttpError(400, 'Model không hợp lệ', 'bad_model');
+  const cheap = b.cheap === 'claude' ? 'claude' : 'workers';
   await env.DB.prepare("INSERT INTO social_settings (key, value, updated_by, updated_at) VALUES ('ai_models', ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at")
-    .bind(JSON.stringify({ write: b.write, fast: b.fast }), user.id, now()).run();
-  await audit(env, request, user.id, 'ai_models_updated', `${b.write} / ${b.fast}`);
-  return json({ models: { write: b.write, fast: b.fast } });
+    .bind(JSON.stringify({ write: b.write, fast: b.fast, cheap }), user.id, now()).run();
+  await audit(env, request, user.id, 'ai_models_updated', `${b.write} / ${b.fast} / ${cheap}`);
+  return json({ models: await claudeModels(env) });
 }
 
 // POST /api/assistant/prompts/suggest: đề xuất prompt mới ngay

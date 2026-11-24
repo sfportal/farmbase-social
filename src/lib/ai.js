@@ -41,6 +41,8 @@ export async function claudeModels(env) {
   return {
     write: VALID.has(saved.write) ? saved.write : claudeModel(env, 'write'),
     fast: VALID.has(saved.fast) ? saved.fast : claudeModel(env, 'fast'),
+    // Việc đọc tin hằng ngày: mặc định Workers AI miễn phí (nếu có), chọn Claude Haiku khi cần chính xác hơn.
+    cheap: saved.cheap === 'claude' || !env.AI ? 'claude' : 'workers',
   };
 }
 
@@ -71,7 +73,12 @@ async function recordUsage(env, model, usage) {
 }
 
 export async function generate(env, { system, prompt, maxTokens = 1200, tier = 'write' }) {
-  const provider = aiProvider(env);
+  let provider = aiProvider(env);
+  // Tầng 'cheap' (đọc, lọc tin hằng ngày): Claude điều phối nhưng giao cho Workers AI miễn phí để tiết kiệm.
+  if (tier === 'cheap') {
+    if (provider === 'claude' && env.AI && (await claudeModels(env)).cheap === 'workers') provider = 'workers';
+    tier = 'fast';
+  }
   if (!provider) throw new HttpError(503, 'Chưa cài AI cho hệ thống', 'no_ai');
   try {
     if (provider === 'fake') {
@@ -137,7 +144,13 @@ function fakeJson(prompt) {
     const days = [...prompt.matchAll(/NGAY (\d{4}-\d{2}-\d{2})/g)].map((m) => m[1]);
     return JSON.stringify({ focus: 'Tuần thử nghiệm: giới thiệu chủ đề chính', note: 'Có thể đổi theo tin tức', days: days.map((d) => ({ date: d, posts: [{ topic_id: sub, angle: 'Góc bài thử', format: 'Ảnh 4:5', visual: 'Ảnh vườn thật', time: '19:30' }] })) });
   }
-  if (kind === 'draft') return JSON.stringify({ posts: [{ topic_id: sub, hook: 'Câu móc thử', message: 'Bài viết thử của trợ lý AI cho ngày mai. Nội dung ngắn gọn, rõ ràng.\n\nMời bà con nhắn tin để được hướng dẫn.', visual: 'Ảnh 4:5: bà con ghi nhật ký tại vườn', prompt_id: 'ha-01', media_prompt: 'Ảnh 4:5, bà con ghi nhật ký trên điện thoại tại vườn sầu riêng, chữ trên ảnh: "Ghi nhật ký vài chạm", màu xanh FarmBase', storyboard: '', reason: 'Bám kế hoạch tuần và chủ đề con', website: { title: 'Gợi ý bài website thử', outline: 'Mở bài; Thân bài; Kết bài' } }] });
+  if (kind === 'draft') {
+    const one = (o, extra) => ({ option: o, topic_id: sub, angle: `Góc thử ${o}`, hook: `Câu móc thử ${o}`, message: `Bài viết thử của trợ lý AI cho ngày mai, phương án ${o}. Nội dung ngắn gọn, rõ ràng.\n\nMời bà con nhắn tin để được hướng dẫn.`, visual: 'Ảnh 4:5: bà con ghi nhật ký tại vườn', prompt_id: 'ha-01', media_prompt: '1. Mục đích và khổ: ảnh đơn 4:5, 1080 px.\n2. Chủ thể: điện thoại ghi nhật ký tại vườn sầu riêng.\n4. Chữ trên hình: "Ghi nhật ký vài chạm".\n5. Màu: xanh FarmBase #084C46.', storyboard: '', reason: `Bám kế hoạch tuần, phương án ${o}`, ...extra });
+    const posts = [one('A', { website: { title: 'Gợi ý bài website thử', outline: 'Mở bài; Thân bài; Kết bài' } })];
+    if (/PHƯƠNG ÁN/.test(prompt)) posts.push(one('B', {}));
+    return JSON.stringify({ posts });
+  }
+  if (kind === 'share') return JSON.stringify({ pick: 1, topic_id: sub, hook: 'Tin đáng chú ý cho bà con', message: 'Tin đáng chú ý cho bà con trồng sầu riêng tuần này.\n\nBài báo nêu yêu cầu mới về truy xuất nguồn gốc khi xuất khẩu.\n\nGóc nhìn: bà con nên ghi nhật ký vườn đều từ bây giờ. Mời bà con đọc bài gốc.', reason: 'Tin mới, đúng chủ đề truy xuất' });
   if (kind === 'check') return JSON.stringify({ ok: true, issues: [] });
   if (kind === 'digest') return JSON.stringify({ items: [...prompt.matchAll(/\[TIN (\d+)\]/g)].map((m) => ({ n: Number(m[1]), digest: 'Tóm tắt tin thử', relevant: true })) });
   if (kind === 'suggest') return JSON.stringify({ suggestions: [{ action: 'new', parent_id: ids[0] || null, title: 'Chủ đề con đề xuất thử', hook: 'Câu móc đề xuất', message: 'Thông điệp đề xuất', cta: 'Nhắn tin cho Fanpage', reason: 'Từ tin tức mới trong kho' }] });
