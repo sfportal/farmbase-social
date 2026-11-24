@@ -1049,6 +1049,16 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await viewer.req('/api/videos?kind=short');
   assert.deepEqual(r.data.items.map((v) => v.url), ['https://www.youtube.com/shorts/vid_short1']);
   assert.ok(!r.data.items[0].idea && r.data.items[0].views === 3400);
+  r = await viewer.req('/api/videos/search', { method: 'POST', body: { q: 'mã số vùng trồng' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.items.map((v) => v.video_id), ['vid_clip1', 'vid_short1'], 'tìm YouTube bằng chữ');
+  assert.equal(r.data.added, 0); assert.equal(r.data.left, 39);
+  r = await viewer.req('/api/videos/search', { method: 'POST', body: { q: 'x' } });
+  assert.equal(r.status, 400);
+  r = await new Client().req('/api/videos/search', { method: 'POST', body: { q: 'GS1' } });
+  assert.equal(r.status, 401);
+  r = await viewer.req(`/api/videos?kind=clip&q=${encodeURIComponent('hội thảo')}`);
+  assert.deepEqual(r.data.items.map((v) => v.video_id), ['vid_clip2'], 'lọc video đã lưu bằng chữ');
   r = await viewer.req('/api/videos?kind=clip&sort=views');
   assert.deepEqual(r.data.items.map((v) => v.video_id), ['vid_clip1', 'vid_clip2']);
   r = await viewer.req(`/api/videos/${r.data.items[0].id}`, { method: 'PATCH', body: { starred: true } });
