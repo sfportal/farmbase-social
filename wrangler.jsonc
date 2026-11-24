@@ -30,6 +30,8 @@
   },
   // Biến bí mật đặt trên Cloudflare, không có trong repo: ADMIN_EMAIL, ADMIN_INITIAL_PASSWORD, TOKEN_KEY, FB_APP_SECRET
   // (repo này công khai, nên email và mật khẩu không được ghi ở đây)
+  // Trợ lý nội dung chạy 7h00 sáng giờ Việt Nam (0h00 UTC) mỗi ngày
+  "triggers": { "crons": ["0 0 * * *"] },
   "keep_vars": true,
   "observability": { "enabled": true }
 }

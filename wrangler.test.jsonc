@@ -21,6 +21,7 @@
     "FB_APP_SECRET": "bi-mat-app-chi-dung-khi-thu",
     "FB_API_VERSION": "v27.0",
     "AI_FAKE_REPLY": "Bài AI viết thử",
+    "AI_FAKE_JSON": "1",
     "SOURCES_ALLOW_LOCAL": "1",
     "NEWS_SEARCH_BASE": "http://localhost:8791",
     "FB_GRAPH_BASE": "http://localhost:8791"

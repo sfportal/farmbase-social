@@ -1,0 +1,514 @@
+// Trợ lý nội dung hằng ngày (chạy 7h00 sáng giờ Việt Nam bằng Cron Trigger, hoặc bấm "Chạy ngay"):
+//  1. Đọc tin mới từ các nguồn tin, tóm tắt những tin liên quan chủ đề vào kho kiến thức (Claude Haiku).
+//  2. Lập kế hoạch tuần cho từng Fanpage nếu chưa có (Claude Sonnet, một lần mỗi tuần).
+//  3. Soạn 1–2 bài cho ngày mai theo kế hoạch, tự kiểm tra (quy tắc cứng + Claude Haiku), ghi lý do,
+//     rồi để ở trạng thái "Chờ duyệt" kèm giờ hẹn. Không bài nào lên Fanpage khi chưa được người dùng duyệt.
+//  4. Thứ Hai: đề xuất cập nhật chủ đề từ tin tức, tài liệu và góp ý.
+import { HttpError, json, readJson, now } from '../lib/http.js';
+import { allowedPageIds, requireRole } from '../lib/auth.js';
+import { audit } from '../lib/audit.js';
+import { generate, parseJson, aiProvider, PROVIDER_LABELS, PRICES, claudeModel } from '../lib/ai.js';
+import { getRules, getPageStyles, enforceStyle, tidy, ruleLimits } from './writing.js';
+import { loadTopics, getBrief } from './topics.js';
+import { fetchText, parseFeed, parseWp, parseNews } from './sources.js';
+
+const VN = 7 * 3600;
+const DAY = 86400;
+const WEEKDAYS = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+const DEFAULT_TIMES = ['19:30', '11:30'];
+
+// ---------- Ngày giờ Việt Nam ----------
+export const vnDate = (ts) => new Date((ts + VN) * 1000).toISOString().slice(0, 10);
+export function weekStart(date) {
+  const d = new Date(`${date}T00:00:00Z`);
+  const wd = (d.getUTCDay() + 6) % 7; // thứ Hai = 0
+  return new Date(d.getTime() - wd * DAY * 1000).toISOString().slice(0, 10);
+}
+export const addDays = (date, n) => new Date(new Date(`${date}T00:00:00Z`).getTime() + n * DAY * 1000).toISOString().slice(0, 10);
+export function tsAt(date, hhmm) {
+  const [h, m] = String(hhmm || '19:30').split(':').map(Number);
+  return Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000) + (h || 0) * 3600 + (m || 0) * 60 - VN;
+}
+const weekday = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
+const cut = (s, n) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n).replace(/\s+\S*$/, '')}…` : t; };
+
+// ---------- Cài đặt ----------
+async function getSetting(env, key, fallback) {
+  const r = await env.DB.prepare('SELECT value FROM social_settings WHERE key = ?').bind(key).first();
+  if (!r) return fallback;
+  try { return JSON.parse(r.value); } catch { return fallback; }
+}
+async function putSetting(env, key, value, userId = null) {
+  await env.DB.prepare('INSERT INTO social_settings (key, value, updated_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at')
+    .bind(key, JSON.stringify(value), userId, now()).run();
+}
+function pageCfg(settings, pageId, hasTopics) {
+  const c = settings.pages?.[pageId] || {};
+  const per = [1, 2].includes(c.per_day) ? c.per_day : 1;
+  const times = Array.isArray(c.times) && c.times.length ? c.times.filter((t) => /^\d{2}:\d{2}$/.test(t)).slice(0, 2) : DEFAULT_TIMES;
+  return { on: c.on === undefined ? hasTopics : !!c.on, per_day: per, times: times.length ? times : DEFAULT_TIMES, website: c.website !== false };
+}
+
+// ---------- Ngữ cảnh gọn cho AI (tiết kiệm token: chỉ chủ đề con đang bật, tóm tắt kiến thức, tiêu đề bài gần đây) ----------
+async function pageContext(env, page) {
+  const [topics, brief, know, recent] = await Promise.all([
+    loadTopics(env, page.id),
+    getBrief(env, page.id),
+    env.DB.prepare("SELECT kind, title, digest, url FROM social_knowledge WHERE (page_id = ? OR page_id IS NULL) AND created_at >= ? ORDER BY created_at DESC LIMIT 14").bind(page.id, now() - 30 * DAY).all(),
+    env.DB.prepare("SELECT message, topic_id FROM social_content WHERE page_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 10").bind(page.id, now() - 21 * DAY).all(),
+  ]);
+  const subs = [];
+  const lines = [];
+  for (const t of topics) {
+    if (t.status === 'paused') continue;
+    const kids = t.children.filter((c) => c.status !== 'paused');
+    if (!kids.length) continue;
+    lines.push(`# ${t.title}${t.share ? ` (${t.share}% số bài)` : ''}${t.goal ? `: ${cut(t.goal, 120)}` : ''}`);
+    for (const c of kids) {
+      subs.push({ ...c, parent_title: t.title, share: t.share || 0 });
+      lines.push(`- (id ${c.id}) ${c.title} | mục tiêu: ${cut(c.goal, 100)} | hook: ${cut(c.hook.split('\n')[0], 110)} | thông điệp: ${cut(c.message, 200)} | CTA: ${cut(c.cta, 100)} | dữ kiện: ${cut(c.facts.replace(/\n/g, '; '), 450)} | định dạng: ${cut(c.formats, 80)} | prompt: ${c.prompt_ids || '-'}`);
+    }
+  }
+  const docs = know.results.filter((k) => k.kind !== 'feedback').slice(0, 8).map((k) => `- [${k.kind === 'news' ? 'Tin' : 'Tài liệu'}] ${cut(k.title, 90)}: ${cut(k.digest, 260)}${k.url ? ` (Nguồn: ${k.url})` : ''}`);
+  const fb = know.results.filter((k) => k.kind === 'feedback').slice(0, 6).map((k) => `- ${cut(k.digest || k.title, 200)}`);
+  const rec = recent.results.map((r) => `- ${cut(r.message.split('\n')[0], 90)}`);
+  const text = [
+    `HỒ SƠ FANPAGE "${page.name}":\n${brief || '(chưa có)'}`,
+    `CHỦ ĐỀ VÀ CHỦ ĐỀ CON (chỉ viết theo các chủ đề con này, ghi đúng id):\n${lines.join('\n') || '(chưa có)'}`,
+    docs.length ? `KIẾN THỨC MỚI (chỉ dùng dữ kiện có ở đây hoặc trong "dữ kiện" của chủ đề):\n${docs.join('\n')}` : '',
+    fb.length ? `GÓP Ý CỦA NGƯỜI DUYỆT (làm theo):\n${fb.join('\n')}` : '',
+    rec.length ? `BÀI ĐÃ CÓ GẦN ĐÂY (tránh lặp lại góc viết):\n${rec.join('\n')}` : '',
+  ].filter(Boolean).join('\n\n');
+  return { text, subs, topics };
+}
+
+function assistantSystem(rules, page, note) {
+  const lim = ruleLimits(rules);
+  return [
+    'Bạn là trợ lý biên tập nội dung Fanpage nông nghiệp tại Đắk Lắk. Viết tiếng Việt có dấu, rõ ràng, thực tế, gần gũi với bà con, chuyên nghiệp với doanh nghiệp.',
+    'Mỗi bài phải có: câu móc (hook) cụ thể ở dòng đầu, một thông điệp rõ theo chủ đề con, và một câu kêu gọi hành động theo CTA của chủ đề (không kèm số điện thoại, website).',
+    'Chỉ dùng dữ kiện có trong hồ sơ Fanpage, dữ kiện chủ đề và kiến thức được cung cấp. Không bịa số liệu, ngày, tên người, giá, cam kết. Thiếu dữ kiện thì viết chung, không tự thêm. Tránh câu sáo rỗng, chung chung.',
+    `Đoạn văn ngắn: mỗi đoạn tối đa 2 câu, các đoạn cách nhau một dòng trống. ${lim.maxEmoji !== null ? `Dùng ${lim.minEmoji ? `${lim.minEmoji} đến ` : 'tối đa '}${lim.maxEmoji} biểu tượng cảm xúc, không đặt liền nhau.` : 'Biểu tượng cảm xúc tiết chế.'}`,
+    'Không viết số điện thoại, website, hashtag trong thân bài: hệ thống tự thêm phần cuối bài. Không dùng Markdown (**, #).',
+    rules ? `QUY ĐỊNH ĐĂNG BÀI CỦA DOANH NGHIỆP (bắt buộc):\n${rules}` : '',
+    note ? `LƯU Ý RIÊNG CỦA FANPAGE "${page.name}": ${note}` : '',
+    'Khi được yêu cầu trả JSON: chỉ trả đúng một đối tượng JSON hợp lệ, không giải thích thêm.',
+  ].filter(Boolean).join('\n\n');
+}
+
+// ---------- Kiểm tra cứng theo quy tắc nội dung (không tốn token) ----------
+export function ruleCheck(text, { campaign = false } = {}) {
+  const issues = [];
+  const t = String(text || '');
+  if (/(BVI|FarmBase|chúng tôi|hệ thống|ứng dụng|app)[^.!?\n]{0,40}cấp mã/i.test(t) && !/thẩm quyền/i.test(t)) issues.push('Có ý BVI, FarmBase hoặc ứng dụng "cấp mã" (việc cấp mã thuộc thẩm quyền cơ quan nhà nước)');
+  if (/durian\s*base/i.test(t)) issues.push('Dùng tên DurianBase (chỉ dùng FarmBase)');
+  if (/100\s?%\s*(nông hộ|hộ|bà con)/i.test(t)) issues.push('Có câu "100% nông hộ"');
+  if (/\b(số 1|duy nhất|hàng đầu)\b/i.test(t)) issues.push('Dùng từ tuyệt đối "số 1", "duy nhất", "hàng đầu"');
+  if (/(chắc chắn|cam kết|bảo đảm|đảm bảo|bao đậu)[^.!?\n]{0,25}(cấp mã|đầu ra|tăng giá|tăng năng suất|GACC)/i.test(t)) issues.push('Có lời hứa cấp mã, đầu ra, tăng giá hoặc năng suất');
+  if (/~?\s?2\.000\s*(nông hộ|hộ)/i.test(t)) issues.push('Dùng số ~2.000 nông hộ (đúng là trên 1.500 nông hộ)');
+  if (campaign) {
+    if (/(8,2\s*tỷ|\d+\s*(tỷ|triệu)\s*(đồng)?|gói\s*(vàng|bạc|đồng|kim cương|bạch kim))/i.test(t)) issues.push('Có chi phí, gói tài trợ (không công khai trên Fanpage)');
+    if (/(đã|vừa)\s*(đạt|hoàn thành|số hóa)[^.!?\n]{0,20}10\.000/i.test(t)) issues.push('Viết mục tiêu 10.000 ha như kết quả đã đạt');
+  }
+  if (t.length > 2200) issues.push('Bài quá dài (trên 2.200 ký tự)');
+  return issues;
+}
+
+function footerFor(st, style) {
+  const has = style.cta || style.hotline || style.website || style.hashtags;
+  if (!has) return null;
+  const contact = [style.cta, style.hotline, style.website ? `Website: ${style.website}` : ''].filter(Boolean).join('\n');
+  return [contact, style.hashtags].filter(Boolean).join('\n\n');
+}
+function compose(st, style, body, source = '') {
+  const clean = enforceStyle(body, { rules: st.value, strip: true, source });
+  const foot = footerFor(st, style);
+  if (foot) return [clean, foot].filter(Boolean).join('\n\n').slice(0, 4800);
+  return enforceStyle(body, { rules: st.value, contact: st.contact, hashtags: st.hashtags, source }).slice(0, 4800);
+}
+
+// Tự kiểm tra một bài: quy tắc cứng trước, rồi Claude Haiku đối chiếu dữ kiện và quy định (rẻ). Lỗi thì nhận bản sửa.
+async function selfCheck(env, { body, sub, st, campaign }) {
+  let text = body;
+  let issues = ruleCheck(text, { campaign });
+  let by = 'Quy tắc nội dung';
+  if (aiProvider(env) && aiProvider(env) !== 'workers') {
+    try {
+      const { text: out } = await generate(env, {
+        tier: 'fast', maxTokens: 2500,
+        system: 'Bạn là người kiểm duyệt bài đăng Fanpage. Đối chiếu bài với quy định và dữ kiện được phép dùng. Chỉ báo lỗi thật: bịa số liệu hoặc dữ kiện không có trong danh sách, sai quy định, thiếu hook hoặc CTA, câu sáo rỗng vô nghĩa, đoạn dài quá 2 câu. Trả JSON.',
+        prompt: `[VIEC:check] QUY ĐỊNH:\n${cut(st.value, 2500)}\n\nDỮ KIỆN ĐƯỢC PHÉP DÙNG:\n${cut(sub?.facts || '', 1200)}\n\nCTA CỦA CHỦ ĐỀ: ${sub?.cta || '-'}\n\nLỖI ĐÃ PHÁT HIỆN BẰNG QUY TẮC: ${issues.join('; ') || 'không'}\n\nBÀI CẦN KIỂM TRA:\n${text}\n\nTrả JSON {"ok": true|false, "issues": ["lỗi ngắn gọn"], "fixed": "thân bài đã sửa nếu có lỗi, để trống nếu ok"}`,
+      });
+      const r = parseJson(out) || {};
+      by = 'Quy tắc nội dung và Claude Haiku';
+      if (Array.isArray(r.issues)) issues = [...new Set([...issues, ...r.issues.map((x) => cut(x, 160)).filter(Boolean)])].slice(0, 8);
+      if (r.ok === false && typeof r.fixed === 'string' && r.fixed.trim().length > 40) {
+        const fixed = tidy(r.fixed);
+        const left = ruleCheck(fixed, { campaign });
+        if (left.length < ruleCheck(text, { campaign }).length || !left.length) return { text: fixed, check: { ok: !left.length, issues, fixed: true, remaining: left, by } };
+      }
+      if (r.ok === true && !ruleCheck(text, { campaign }).length) return { text, check: { ok: true, issues: [], by } };
+    } catch (e) { console.error('check', e?.message); }
+  }
+  return { text, check: { ok: !issues.length, issues, by } };
+}
+
+// ---------- 1. Đọc tin mới vào kho kiến thức ----------
+export async function learnNews(env, log = []) {
+  if (!aiProvider(env)) return log;
+  const { results: sources } = await env.DB.prepare("SELECT * FROM social_sources WHERE kind = 'website' ORDER BY (feed_type = 'news') DESC, created_at DESC LIMIT 4").all();
+  if (!sources.length) return log;
+  const { results: topicRows } = await env.DB.prepare("SELECT page_id, keywords FROM social_topics WHERE keywords != '' AND status = 'active'").all();
+  const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
+  const kwByPage = {};
+  for (const r of topicRows) for (const k of r.keywords.split(',').map((x) => fold(x).trim()).filter((x) => x.length > 2)) (kwByPage[r.page_id] ||= new Set()).add(k);
+  const since = now() - 4 * DAY;
+  const items = [];
+  for (const s of sources) {
+    try {
+      const r = await fetchText(s.feed_url, s.feed_type === 'wp' ? 'application/json' : 'application/rss+xml,application/xml,*/*');
+      const list = s.feed_type === 'wp' ? parseWp(JSON.parse(r.text)) : s.feed_type === 'news' ? parseNews(r.text) : parseFeed(r.text);
+      for (const it of list.slice(0, 15)) if (!it.date || it.date >= since) items.push({ ...it, source: s.name });
+    } catch (e) { log.push(`Không đọc được nguồn "${s.name}": ${cut(e.message, 80)}`); }
+  }
+  if (!items.length) return log;
+  // Bỏ tin đã có trong kho, chấm điểm theo từ khóa của chủ đề.
+  const urls = [...new Set(items.map((i) => i.url))];
+  const seen = new Set();
+  for (let i = 0; i < urls.length; i += 50) {
+    const part = urls.slice(i, i + 50);
+    const { results } = await env.DB.prepare(`SELECT url FROM social_knowledge WHERE url IN (${part.map(() => '?').join(',')})`).bind(...part).all();
+    for (const r of results) seen.add(r.url);
+  }
+  const fresh = [];
+  for (const it of items) {
+    if (seen.has(it.url) || fresh.some((f) => f.url === it.url)) continue;
+    const text = fold(`${it.title} ${it.summary}`);
+    let best = null; let score = 0;
+    for (const [pid, kws] of Object.entries(kwByPage)) {
+      const n = [...kws].filter((k) => text.includes(k)).length;
+      if (n > score) { score = n; best = pid; }
+    }
+    if (score > 0) fresh.push({ ...it, page_id: best, score });
+  }
+  fresh.sort((a, b) => b.score - a.score || (b.date || 0) - (a.date || 0));
+  const pick = fresh.slice(0, 6);
+  if (!pick.length) { log.push('Không có tin mới khớp từ khóa chủ đề'); return log; }
+  const { text } = await generate(env, {
+    tier: 'fast', maxTokens: 2000,
+    system: 'Bạn đọc tin tức nông nghiệp cho người viết Fanpage FarmBase và Chiến dịch 10.000 ha (Đắk Lắk). Tóm tắt dữ kiện cụ thể dùng được (ai, làm gì, ở đâu, khi nào, số liệu). Không thêm ý ngoài tin. Tiếng Việt có dấu.',
+    prompt: `[VIEC:digest] Với mỗi tin, viết tóm tắt 1–2 câu và cho biết có liên quan đến mã số vùng trồng, truy xuất, sầu riêng, cà phê, HTX, xuất khẩu nông sản Tây Nguyên không. Trả JSON {"items":[{"n":1,"digest":"...","relevant":true}]}\n\n${pick.map((it, i) => `[TIN ${i + 1}] ${cut(it.title, 160)} — ${cut(it.summary, 320)} — ${it.publisher || it.source}`).join('\n')}`,
+  });
+  const out = parseJson(text)?.items || [];
+  const t = now();
+  const stmts = [];
+  for (const o of out) {
+    const it = pick[Number(o.n) - 1];
+    if (!it || o.relevant === false || !o.digest) continue;
+    stmts.push(env.DB.prepare("INSERT INTO social_knowledge (page_id, kind, title, body, digest, url, created_at) VALUES (?, 'news', ?, ?, ?, ?, ?)")
+      .bind(it.page_id || null, cut(it.title, 200), cut(it.summary, 1500), cut(o.digest, 600), it.url, t));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  log.push(`Đã đọc ${items.length} tin, lưu ${stmts.length} tin liên quan vào kho kiến thức`);
+  return log;
+}
+
+// ---------- 2. Kế hoạch tuần ----------
+export async function makePlan(env, page, ws, cfg, { feedback = '' } = {}) {
+  const st = await getRules(env);
+  const style = (await getPageStyles(env, [page.id]))[page.id] || {};
+  const ctx = await pageContext(env, page);
+  if (!ctx.subs.length) throw new HttpError(400, `Fanpage "${page.name}" chưa có chủ đề con`, 'no_topics');
+  const days = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+  const prev = await env.DB.prepare('SELECT body FROM social_plans WHERE page_id = ? AND week_start = ?').bind(page.id, ws).first();
+  const prompt = `[VIEC:plan] Lập kế hoạch nội dung Facebook tuần ${ws} đến ${days[6]} cho Fanpage "${page.name}", mỗi ngày ${cfg.per_day} bài, giờ đăng gợi ý ${cfg.times.slice(0, cfg.per_day).join(' và ')}.
+Phân bổ theo tỷ trọng chủ đề, xen kẽ định dạng (ảnh, carousel, video ngắn), ngày đầu tuần ưu tiên bài kiến thức, cuối tuần ưu tiên câu chuyện, hình ảnh thật. Bám mùa vụ hiện tại và tin tức mới nếu có.
+${days.map((d) => `NGAY ${d} (${weekday(d)})`).join('\n')}
+${feedback ? `\nGÓP Ý CỦA NGƯỜI DUYỆT CHO KẾ HOẠCH (bắt buộc làm theo): ${feedback}\n` : ''}${prev && feedback ? `\nKẾ HOẠCH CŨ:\n${cut(prev.body, 2500)}\n` : ''}
+Trả JSON {"focus":"định hướng tuần 1–2 câu: muốn đạt gì","note":"điều có thể thay đổi theo dữ liệu hoặc tin tức","website":[{"title":"tiêu đề bài website gợi ý (dưới 60 ký tự)","outline":"dàn ý 3–5 ý","topic_id":0}],"days":[{"date":"YYYY-MM-DD","posts":[{"topic_id":0,"angle":"góc bài cụ thể","format":"định dạng","visual":"hình ảnh/video cần thiết kế","prompt_id":"mã prompt của chủ đề","time":"HH:MM","why":"vì sao bài này vào ngày này"}]}]}`;
+  const { text, provider } = await generate(env, { tier: 'write', maxTokens: 6000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
+  const plan = parseJson(text);
+  if (!plan || !Array.isArray(plan.days)) throw new HttpError(502, 'AI chưa trả về kế hoạch hợp lệ, vui lòng thử lại', 'ai_bad');
+  const valid = new Set(ctx.subs.map((s) => s.id));
+  plan.days = days.map((d) => {
+    const day = plan.days.find((x) => x.date === d) || { date: d, posts: [] };
+    const posts = (Array.isArray(day.posts) ? day.posts : []).slice(0, cfg.per_day).map((p, i) => ({
+      topic_id: valid.has(Number(p.topic_id)) ? Number(p.topic_id) : ctx.subs[(days.indexOf(d) + i) % ctx.subs.length].id,
+      angle: cut(p.angle, 300), format: cut(p.format, 100), visual: cut(p.visual, 300), prompt_id: /^[a-z]{2}-\d{2}$/.test(p.prompt_id || '') ? p.prompt_id : '',
+      time: /^\d{2}:\d{2}$/.test(p.time || '') ? p.time : cfg.times[i] || DEFAULT_TIMES[0], why: cut(p.why, 300),
+    })).map((p) => ({ ...p, topic_title: ctx.subs.find((s) => s.id === p.topic_id)?.title || '' }));
+    return { date: d, weekday: weekday(d), posts };
+  });
+  plan.focus = cut(plan.focus, 400); plan.note = cut(plan.note, 400);
+  plan.website = cfg.website && Array.isArray(plan.website) ? plan.website.slice(0, 2).map((w) => ({ title: cut(w.title, 90), outline: cut(w.outline, 600), topic_id: valid.has(Number(w.topic_id)) ? Number(w.topic_id) : null })) : [];
+  plan.provider = PROVIDER_LABELS[provider];
+  plan.feedback = feedback || undefined;
+  const t = now();
+  await env.DB.prepare('INSERT INTO social_plans (page_id, week_start, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(page_id, week_start) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at')
+    .bind(page.id, ws, JSON.stringify(plan), t, t).run();
+  return plan;
+}
+
+async function loadPlan(env, pageId, ws) {
+  const r = await env.DB.prepare('SELECT body, updated_at FROM social_plans WHERE page_id = ? AND week_start = ?').bind(pageId, ws).first();
+  if (!r) return null;
+  return { ...(parseJson(r.body) || {}), week_start: ws, updated_at: r.updated_at };
+}
+
+// ---------- 3. Soạn bài cho một ngày ----------
+export async function makeDrafts(env, page, date, cfg, log = []) {
+  const done = await env.DB.prepare("SELECT COUNT(*) AS n FROM social_content WHERE page_id = ? AND json_extract(ai_meta, '$.date') = ?").bind(page.id, date).first();
+  if (done.n >= cfg.per_day) { log.push(`${page.name}: đã có bài cho ngày ${date}`); return []; }
+  const ws = weekStart(date);
+  let plan = await loadPlan(env, page.id, ws);
+  if (!plan) { plan = await makePlan(env, page, ws, cfg); log.push(`${page.name}: đã lập kế hoạch tuần ${ws}`); }
+  const st = await getRules(env);
+  const style = (await getPageStyles(env, [page.id]))[page.id] || {};
+  const ctx = await pageContext(env, page);
+  const day = plan.days?.find((d) => d.date === date) || { posts: [] };
+  const want = cfg.per_day - done.n;
+  const slots = (day.posts || []).slice(done.n, done.n + want);
+  while (slots.length < want) slots.push({ topic_id: ctx.subs[slots.length % ctx.subs.length]?.id, angle: '', time: cfg.times[slots.length] || DEFAULT_TIMES[0] });
+  const byId = Object.fromEntries(ctx.subs.map((s) => [s.id, s]));
+  const campaign = /10\.?000/.test(page.name);
+  const prompt = `[VIEC:draft] Viết ${slots.length} bài Facebook cho ngày ${date} (${weekday(date)}) trên Fanpage "${page.name}" theo kế hoạch:
+${slots.map((s, i) => `${i + 1}. (id ${s.topic_id}) ${byId[s.topic_id]?.title || ''} | góc bài: ${s.angle || 'tự chọn theo chủ đề'} | định dạng: ${s.format || byId[s.topic_id]?.formats || ''} | hình: ${s.visual || ''}`).join('\n')}
+Mỗi bài 80 đến 180 chữ, mở bằng hook cụ thể, kết bằng câu kêu gọi theo CTA của chủ đề con.
+Prompt có thể chọn (theo chủ đề): ${[...new Set(slots.flatMap((s) => (byId[s.topic_id]?.prompt_ids || '').split(',').filter(Boolean)))].join(', ') || '-'}.
+Trả JSON {"posts":[{"topic_id":0,"hook":"câu móc","message":"thân bài hoàn chỉnh (gồm hook ở đầu, không gồm liên hệ và hashtag)","visual":"hình ảnh hoặc video cần thiết kế: kích thước, bố cục, chữ trên ảnh","prompt_id":"mã prompt","storyboard":"nếu là video: 4–6 dòng 'giây | hình | chữ trên màn hình | lời đọc', không phải video thì để trống","reason":"vì sao nên đăng bài này hôm đó (1–2 câu)","source":"link nguồn nếu dùng tin tức, không thì để trống"${cfg.website ? ',"website":{"title":"tiêu đề bài website dưới 60 ký tự","outline":"dàn ý 3–5 ý"}' : ''}}]}`;
+  const { text, provider } = await generate(env, { tier: 'write', maxTokens: 6000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
+  const out = parseJson(text);
+  const posts = Array.isArray(out?.posts) ? out.posts : [];
+  if (!posts.length) throw new HttpError(502, 'AI chưa trả về bài hợp lệ, vui lòng thử lại', 'ai_bad');
+  const created = [];
+  const t = now();
+  for (let i = 0; i < Math.min(posts.length, slots.length); i++) {
+    const p = posts[i];
+    const slot = slots[i];
+    const sub = byId[Number(p.topic_id)] || byId[slot.topic_id] || null;
+    const raw = tidy(String(p.message || '')).slice(0, 4000);
+    if (raw.length < 40) continue;
+    const source = /^https?:\/\//.test(p.source || '') ? String(p.source).slice(0, 500) : '';
+    const checked = await selfCheck(env, { body: enforceStyle(raw, { rules: st.value, strip: true }), sub, st, campaign });
+    const message = compose(st, style, checked.text, source);
+    const meta = {
+      date, by: 'assistant', provider: PROVIDER_LABELS[provider], hook: cut(p.hook, 200), visual: cut(p.visual || slot.visual, 600),
+      prompt_id: /^[a-z]{2}-\d{2}$/.test(p.prompt_id || '') ? p.prompt_id : (sub?.prompt_ids || '').split(',')[0] || '',
+      storyboard: cut(p.storyboard, 1500), storyboard_id: sub?.storyboard_id || '', reason: cut(p.reason || slot.why, 500),
+      angle: slot.angle || '', check: checked.check, website: cfg.website && p.website?.title ? { title: cut(p.website.title, 90), outline: cut(p.website.outline, 800) } : null,
+      ads: sub?.ads ? cut(sub.ads, 400) : '', topic_title: sub?.title || '', parent_title: sub?.parent_title || '',
+    };
+    const at = Math.max(tsAt(date, slot.time || cfg.times[i] || DEFAULT_TIMES[0]), t + 3600);
+    const row = await env.DB.prepare(
+      "INSERT INTO social_content (page_id, message, scheduled_at, status, topic_id, ai_meta, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?) RETURNING id"
+    ).bind(page.id, message, at, sub?.id || null, JSON.stringify(meta), t, t).first();
+    created.push(row.id);
+  }
+  log.push(`${page.name}: soạn ${created.length} bài cho ${weekday(date)} ${date}, chờ duyệt`);
+  return created;
+}
+
+// ---------- 4. Đề xuất cập nhật chủ đề ----------
+export async function suggestTopics(env, page, log = []) {
+  const ctx = await pageContext(env, page);
+  if (!ctx.subs.length) return log;
+  const { results: know } = await env.DB.prepare("SELECT kind, title, digest, url FROM social_knowledge WHERE (page_id = ? OR page_id IS NULL) AND created_at >= ? ORDER BY created_at DESC LIMIT 15").bind(page.id, now() - 14 * DAY).all();
+  if (!know.length) { log.push(`${page.name}: chưa có kiến thức mới để đề xuất`); return log; }
+  const parents = ctx.topics.map((t) => `(id ${t.id}) ${t.title}`).join('; ');
+  const { text } = await generate(env, {
+    tier: 'fast', maxTokens: 3000,
+    system: 'Bạn là biên tập viên nội dung. Từ kiến thức mới, đề xuất tối đa 3 cập nhật cho kho chủ đề: thêm chủ đề con mới hoặc sửa chủ đề con đang có (bổ sung dữ kiện, hook, thông điệp). Chỉ đề xuất khi có dữ kiện cụ thể mới, không đề xuất chung chung. Tiếng Việt có dấu. Trả JSON.',
+    prompt: `[VIEC:suggest] Fanpage "${page.name}". Chủ đề cha: ${parents}\n\nChủ đề con hiện có:\n${ctx.subs.map((s) => `(id ${s.id}) ${s.title} | dữ kiện: ${cut(s.facts.replace(/\n/g, '; '), 200)}`).join('\n')}\n\nKIẾN THỨC MỚI:\n${know.map((k) => `- [${k.kind}] ${cut(k.title, 100)}: ${cut(k.digest, 250)}${k.url ? ` (${k.url})` : ''}`).join('\n')}\n\nTrả JSON {"suggestions":[{"action":"new|update","topic_id":"id chủ đề con nếu update","parent_id":"id chủ đề cha nếu new","title":"","hook":"","message":"","cta":"","facts":"dữ kiện mới, mỗi dòng một ý, kèm nguồn","keywords":"","reason":"vì sao nên cập nhật"}]}`,
+  });
+  const list = (parseJson(text)?.suggestions || []).slice(0, 3);
+  const subIds = new Set(ctx.subs.map((s) => s.id));
+  const parentIds = new Set(ctx.topics.map((t) => t.id));
+  const t = now();
+  const stmts = [];
+  for (const s of list) {
+    const action = s.action === 'update' && subIds.has(Number(s.topic_id)) ? 'update' : 'new';
+    const parentId = action === 'new' ? (parentIds.has(Number(s.parent_id)) ? Number(s.parent_id) : ctx.topics[0]?.id) : null;
+    const payload = {};
+    for (const k of ['title', 'hook', 'message', 'cta', 'facts', 'keywords']) if (s[k]) payload[k] = cut(s[k], 1500);
+    if (action === 'new' && !payload.title) continue;
+    stmts.push(env.DB.prepare("INSERT INTO social_topic_suggestions (page_id, topic_id, parent_id, action, payload, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(page.id, action === 'update' ? Number(s.topic_id) : null, parentId, action, JSON.stringify(payload), cut(s.reason, 400), t));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  log.push(`${page.name}: ${stmts.length} đề xuất cập nhật chủ đề`);
+  return log;
+}
+
+// ---------- Chạy hằng ngày ----------
+const SYS_REQ = { headers: new Headers() };
+export async function runDaily(env, { pageIds = null, steps = ['learn', 'plan', 'drafts', 'suggest'], force = false, userId = null } = {}) {
+  const log = [];
+  const t = now();
+  const today = vnDate(t);
+  const tomorrow = addDays(today, 1);
+  const settings = await getSetting(env, 'assistant', { pages: {} });
+  if (!aiProvider(env)) return { log: ['Chưa cài AI cho hệ thống'] };
+  if (steps.includes('learn')) { try { await learnNews(env, log); } catch (e) { log.push(`Đọc tin lỗi: ${cut(e.message, 120)}`); } }
+  const { results: pages } = await env.DB.prepare(
+    "SELECT p.id, p.name, (SELECT COUNT(*) FROM social_topics t WHERE t.page_id = p.id AND t.parent_id IS NOT NULL) AS subs FROM social_pages p WHERE p.status != 'disconnected' ORDER BY p.name"
+  ).all();
+  for (const page of pages) {
+    if (pageIds && !pageIds.includes(page.id)) continue;
+    const cfg = pageCfg(settings, page.id, page.subs > 0);
+    if (!page.subs || (!cfg.on && !force)) continue;
+    try {
+      if (steps.includes('plan')) {
+        const ws = weekStart(tomorrow);
+        if (force || !(await loadPlan(env, page.id, ws))) { await makePlan(env, page, ws, cfg); log.push(`${page.name}: lập kế hoạch tuần ${ws}`); }
+      }
+      if (steps.includes('drafts')) await makeDrafts(env, page, tomorrow, cfg, log);
+      const monday = new Date(`${today}T00:00:00Z`).getUTCDay() === 1;
+      if (steps.includes('suggest') && (monday || force)) await suggestTopics(env, page, log);
+    } catch (e) { log.push(`${page.name}: lỗi ${cut(e.message, 160)}`); }
+  }
+  settings.last_run = t;
+  settings.last_log = log.slice(0, 30);
+  await putSetting(env, 'assistant', settings, userId);
+  await audit(env, SYS_REQ, userId, 'assistant_run', today, { log: log.slice(0, 10) });
+  return { log };
+}
+
+// ---------- API ----------
+function noAgent(user) { if (user.role === 'agent') throw new HttpError(403, 'Không có quyền', 'forbidden'); }
+
+function usageCost(u) {
+  let usd = 0;
+  const rows = [];
+  for (const [model, m] of Object.entries(u || {})) {
+    const p = PRICES[model] || [2, 10];
+    const c = (m.in * p[0] + m.cache * p[0] * 0.1 + m.out * p[1]) / 1e6;
+    usd += c;
+    rows.push({ model, ...m, usd: Math.round(c * 1000) / 1000 });
+  }
+  return { usd: Math.round(usd * 100) / 100, rows };
+}
+
+// GET /api/assistant?page_id=
+export async function assistantState(request, env, user) {
+  noAgent(user);
+  const ids = await allowedPageIds(env, user);
+  const pid = new URL(request.url).searchParams.get('page_id') || ids[0];
+  if (!pid || !ids.includes(pid)) return json({ page: null, pages: [] });
+  const marks = ids.map(() => '?').join(',');
+  const { results: pages } = await env.DB.prepare(
+    `SELECT p.id, p.name, p.picture_url, (SELECT COUNT(*) FROM social_topics t WHERE t.page_id = p.id AND t.parent_id IS NOT NULL) AS subs FROM social_pages p WHERE p.id IN (${marks}) ORDER BY p.name`
+  ).bind(...ids).all();
+  const page = pages.find((p) => p.id === pid);
+  const settings = await getSetting(env, 'assistant', { pages: {} });
+  const t = now();
+  const today = vnDate(t);
+  const tomorrow = addDays(today, 1);
+  const wsNow = weekStart(today);
+  const wsNext = weekStart(tomorrow);
+  const [plan, planNext, drafts] = await Promise.all([
+    loadPlan(env, pid, wsNow), wsNext !== wsNow ? loadPlan(env, pid, wsNext) : null,
+    env.DB.prepare("SELECT c.id, c.message, c.status, c.scheduled_at, c.topic_id, c.ai_meta, c.created_at, c.reject_reason FROM social_content c WHERE c.page_id = ? AND c.ai_meta IS NOT NULL ORDER BY COALESCE(c.scheduled_at, c.created_at) DESC LIMIT 30").bind(pid).all(),
+  ]);
+  const month = new Date((t + VN) * 1000).toISOString().slice(0, 7);
+  const usage = usageCost(await getSetting(env, `ai_usage:${month}`, {}));
+  const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM social_topic_suggestions WHERE page_id = ? AND status = 'pending'").bind(pid).first();
+  return json({
+    page, pages: pages.map((p) => ({ ...p, cfg: pageCfg(settings, p.id, p.subs > 0) })),
+    cfg: pageCfg(settings, pid, page.subs > 0), today, tomorrow,
+    plans: [plan, planNext].filter(Boolean),
+    drafts: drafts.results.map((d) => ({ ...d, ai_meta: parseJson(d.ai_meta) || {} })),
+    last_run: settings.last_run || null, last_log: settings.last_log || [],
+    usage: { month, ...usage }, provider: PROVIDER_LABELS[aiProvider(env)] || null,
+    models: aiProvider(env) === 'claude' ? { write: claudeModel(env, 'write'), fast: claudeModel(env, 'fast') } : null,
+    pending_suggestions: pending.n,
+    can_run: user.role === 'owner' || user.role === 'manager',
+  });
+}
+
+// PUT /api/assistant/settings { page_id, on, per_day, times, website }
+export async function saveAssistantSettings(request, env, user) {
+  requireRole(user, 'owner', 'manager');
+  const b = await readJson(request);
+  const pid = String(b.page_id || '');
+  if (!(await allowedPageIds(env, user)).includes(pid)) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
+  const settings = await getSetting(env, 'assistant', { pages: {} });
+  settings.pages ||= {};
+  settings.pages[pid] = {
+    on: !!b.on, per_day: Number(b.per_day) === 2 ? 2 : 1,
+    times: (Array.isArray(b.times) ? b.times : []).filter((x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x)).slice(0, 2),
+    website: b.website !== false,
+  };
+  await putSetting(env, 'assistant', settings, user.id);
+  await audit(env, request, user.id, 'assistant_settings', pid, settings.pages[pid]);
+  return json({ ok: true });
+}
+
+// POST /api/assistant/run { page_id, steps?: [learn, plan, drafts, suggest] }
+export async function runNow(request, env, user) {
+  requireRole(user, 'owner', 'manager');
+  const b = await readJson(request);
+  const pid = String(b.page_id || '');
+  if (!(await allowedPageIds(env, user)).includes(pid)) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
+  const steps = (Array.isArray(b.steps) ? b.steps : ['learn', 'plan', 'drafts']).filter((s) => ['learn', 'plan', 'drafts', 'suggest'].includes(s));
+  const r = await runDaily(env, { pageIds: [pid], steps, force: steps.includes('suggest') || b.replan === true, userId: user.id });
+  return json(r);
+}
+
+// POST /api/assistant/plan-feedback { page_id, week_start, feedback }: lập lại kế hoạch tuần theo góp ý
+export async function planFeedback(request, env, user) {
+  requireRole(user, 'owner', 'manager');
+  const b = await readJson(request);
+  const pid = String(b.page_id || '');
+  if (!(await allowedPageIds(env, user)).includes(pid)) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
+  const feedback = String(b.feedback || '').trim().slice(0, 1000);
+  const ws = /^\d{4}-\d{2}-\d{2}$/.test(b.week_start || '') ? weekStart(b.week_start) : weekStart(addDays(vnDate(now()), 1));
+  const page = await env.DB.prepare('SELECT id, name FROM social_pages WHERE id = ?').bind(pid).first();
+  const settings = await getSetting(env, 'assistant', { pages: {} });
+  if (feedback) await saveFeedback(env, pid, `Kế hoạch tuần: ${feedback}`, user.id);
+  const plan = await makePlan(env, page, ws, pageCfg(settings, pid, true), { feedback });
+  await audit(env, request, user.id, 'plan_regenerated', page.name, { week_start: ws });
+  return json({ plan: { ...plan, week_start: ws } });
+}
+
+async function saveFeedback(env, pageId, text, userId) {
+  await env.DB.prepare("INSERT INTO social_knowledge (page_id, kind, title, body, digest, created_by, created_at) VALUES (?, 'feedback', ?, ?, ?, ?, ?)")
+    .bind(pageId, cut(text, 120), text, cut(text, 400), userId, now()).run();
+}
+
+// POST /api/assistant/revise/:id { feedback }: viết lại bài theo góp ý; góp ý được lưu để các bài sau làm theo.
+export async function reviseDraft(request, env, user, id) {
+  noAgent(user);
+  const row = await env.DB.prepare('SELECT c.*, p.name AS page_name FROM social_content c JOIN social_pages p ON p.id = c.page_id WHERE c.id = ?').bind(Number(id)).first();
+  if (!row || !(await allowedPageIds(env, user)).includes(row.page_id)) throw new HttpError(404, 'Không tìm thấy bài', 'not_found');
+  if (!['draft', 'pending', 'rejected', 'failed'].includes(row.status)) throw new HttpError(409, 'Bài đã đăng hoặc đã hẹn giờ', 'bad_status');
+  if (user.role === 'editor' && row.created_by && row.created_by !== user.id) throw new HttpError(403, 'Không có quyền sửa bài này', 'forbidden');
+  const b = await readJson(request);
+  const feedback = String(b.feedback || '').trim().slice(0, 1000);
+  if (feedback.length < 3) throw new HttpError(400, 'Vui lòng nhập góp ý', 'empty');
+  const page = { id: row.page_id, name: row.page_name };
+  const st = await getRules(env);
+  const style = (await getPageStyles(env, [page.id]))[page.id] || {};
+  const ctx = await pageContext(env, page);
+  const sub = ctx.subs.find((s) => s.id === row.topic_id) || null;
+  // Bỏ phần cuối bài (footer riêng Trang hoặc liên hệ chung) trước khi viết lại, để không bị lặp.
+  let cur = row.message;
+  const foot = footerFor(st, style);
+  if (foot && cur.includes(foot)) cur = cur.replace(foot, '');
+  if (st.contact && cur.includes(st.contact)) cur = cur.replace(st.contact, '');
+  const body = enforceStyle(cur, { rules: st.value, strip: true });
+  const src = (row.message.match(/^\s*Nguồn:\s*(\S+)\s*$/im) || [])[1] || '';
+  const { text, provider } = await generate(env, {
+    tier: 'write', maxTokens: 2500, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`,
+    prompt: `Viết lại bài dưới đây theo góp ý của người duyệt. Giữ dữ kiện đúng, không thêm số liệu mới. Chỉ trả về thân bài (không liên hệ, không hashtag).\n\nGÓP Ý: ${feedback}\n${sub ? `\nCHỦ ĐỀ CON: ${sub.title} | CTA: ${sub.cta}\n` : ''}\nBÀI HIỆN TẠI:\n${body}`,
+  });
+  const revised = tidy(provider === 'fake' ? `${body}\n\n(Đã sửa theo góp ý: ${feedback})` : text);
+  const checked = await selfCheck(env, { body: enforceStyle(revised, { rules: st.value, strip: true }), sub, st, campaign: /10\.?000/.test(page.name) });
+  const message = compose(st, style, checked.text, src);
+  const meta = parseJson(row.ai_meta) || {};
+  meta.check = checked.check;
+  meta.feedback = [...(meta.feedback || []), { text: feedback, at: now() }].slice(-5);
+  await env.DB.prepare('UPDATE social_content SET message = ?, ai_meta = ?, updated_at = ? WHERE id = ?').bind(message, JSON.stringify(meta), now(), row.id).run();
+  await saveFeedback(env, page.id, feedback, user.id);
+  await audit(env, request, user.id, 'ai_revised', cut(feedback, 80), { id: row.id });
+  return json({ message, check: checked.check });
+}
