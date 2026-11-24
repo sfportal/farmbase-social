@@ -73,6 +73,15 @@ async function addIdeas(env, rows) {
   } catch { return 0; }
 }
 
+// Chỉ giữ video tiếng Việt: tiêu đề hoặc mô tả có chữ đặc trưng tiếng Việt (ă, â, đ, ê, ô, ơ, ư và dấu thanh),
+// hoặc YouTube ghi ngôn ngữ âm thanh là tiếng Việt.
+const VI_CHARS = /[ăâđêôơưàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ]/gi;
+export function isVietnamese(text, lang = '') {
+  const t = String(text || '');
+  if ((t.match(VI_CHARS) || []).length >= 3) return true;
+  return /^vi\b/i.test(String(lang || ''));
+}
+
 export async function runVideos(env, { userId = null } = {}) {
   if (!env.YOUTUBE_API_KEY) return { total: 0, log: ['Chưa có YOUTUBE_API_KEY'], skipped: true };
   const t = now();
@@ -92,7 +101,7 @@ export async function runVideos(env, { userId = null } = {}) {
   const { results: comps } = await env.DB.prepare("SELECT id, name, keywords FROM social_competitors WHERE active = 1 AND keywords != '' ORDER BY id").all().catch(() => ({ results: [] }));
   for (const c of comps.slice(0, MAX_COMPETITOR_SEARCH)) {
     try {
-      const d = await yt(env, 'search', { part: 'snippet', type: 'video', q: `"${c.keywords}"`, regionCode: 'VN', publishedAfter: after, order: 'date', maxResults: '8' });
+      const d = await yt(env, 'search', { part: 'snippet', type: 'video', q: `"${c.keywords}"`, regionCode: 'VN', relevanceLanguage: 'vi', publishedAfter: after, order: 'date', maxResults: '8' });
       let n = 0;
       for (const it of d.items || []) {
         const id = it.id?.videoId;
@@ -110,12 +119,14 @@ export async function runVideos(env, { userId = null } = {}) {
     results.forEach((r) => existing.add(r.video_id));
   }
   const newIds = ids.filter((id) => !existing.has(id));
-  const added = [];
+  const added = []; let skippedLang = 0;
   for (let i = 0; i < newIds.length; i += 50) {
     let d;
     try { d = await yt(env, 'videos', { part: 'snippet,contentDetails,statistics', id: newIds.slice(i, i + 50).join(','), maxResults: '50' }); }
     catch (e) { log.push(`Chi tiết video: ${e.message}`); break; }
     for (const v of d.items || []) {
+      const sn0 = v.snippet || {};
+      if (!isVietnamese(`${sn0.title || ''} ${sn0.description || ''}`, sn0.defaultAudioLanguage || sn0.defaultLanguage)) { skippedLang++; continue; }
       const sec = isoSeconds(v.contentDetails?.duration);
       const kind = kindOf(sec);
       const sn = v.snippet || {}; const st = v.statistics || {};
@@ -139,6 +150,15 @@ export async function runVideos(env, { userId = null } = {}) {
       await env.DB.prepare(`UPDATE social_videos SET last_seen_at = ? WHERE platform = 'youtube' AND video_id IN (${part.map(() => '?').join(',')})`).bind(t, ...part).run();
     }
   }
+  if (skippedLang) log.push(`Bỏ qua ${skippedLang} video không phải tiếng Việt`);
+  // Ẩn video tự lấy trước đây mà không phải tiếng Việt (chỉ ẩn, không xóa).
+  const { results: olds } = await env.DB.prepare("SELECT id, title, description FROM social_videos WHERE platform = 'youtube' AND source = 'auto' AND hidden = 0").all();
+  const hideIds = olds.filter((r) => !isVietnamese(`${r.title} ${r.description}`)).map((r) => r.id);
+  for (let i = 0; i < hideIds.length; i += 50) {
+    const part = hideIds.slice(i, i + 50);
+    await env.DB.prepare(`UPDATE social_videos SET hidden = 1 WHERE id IN (${part.map(() => '?').join(',')})`).bind(...part).run();
+  }
+  if (hideIds.length) log.push(`Ẩn ${hideIds.length} video cũ không phải tiếng Việt`);
   const ideas = await addIdeas(env, added.slice(0, 30));
   await putSetting(env, 'video_last_run', { at: t, added: added.length, ideas, log }, userId);
   return { total: added.length, ideas, log };

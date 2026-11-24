@@ -126,7 +126,8 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
   assert.ok(adLibraryUrl({ name: 'Hợp Trí', keywords: '' }).includes(`q=${encodeURIComponent('Hợp Trí')}`));
   assert.equal(mentions({ title: 'Qcert ra mắt dịch vụ', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), true);
   assert.equal(mentions({ title: 'Giá sầu riêng hôm nay', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), false);
-  const { isoSeconds, kindOf } = await import('../src/routes/videos.js');
+  const { isoSeconds, kindOf, isVietnamese } = await import('../src/routes/videos.js');
+  assert.ok(isVietnamese('Mã số vùng trồng là gì?')); assert.ok(!isVietnamese('Smart farm tour in Thailand')); assert.ok(isVietnamese('FarmBase demo', 'vi')); assert.ok(!isVietnamese('FarmBase demo', 'en'));
   assert.equal(isoSeconds('PT1H2M3S'), 3723); assert.equal(isoSeconds('PT45S'), 45); assert.equal(isoSeconds('P1D'), 86400);
   assert.equal(kindOf(45), 'short'); assert.equal(kindOf(180), 'short'); assert.equal(kindOf(181), 'clip'); assert.equal(kindOf(null), 'clip');
   const { parseVideoLink } = await import('../src/routes/videos.js');
