@@ -1641,7 +1641,7 @@ const ACTIONS = {
   media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', prompt_accepted: 'Thêm prompt bổ sung', prompt_dismissed: 'Bỏ qua prompt đề xuất', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   topics_seeded: 'Nạp bộ chủ đề mẫu', topics_replaced: 'Thay bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
-  knowledge_added: 'Nạp tài liệu', knowledge_updated: 'Sửa tóm tắt kiến thức', knowledge_deleted: 'Xóa kiến thức', suggestion_accepted: 'Chấp nhận đề xuất chủ đề', suggestion_dismissed: 'Bỏ qua đề xuất chủ đề',
+  knowledge_added: 'Nạp tài liệu', knowledge_updated: 'Sửa tài liệu kiến thức', knowledge_deleted: 'Xóa kiến thức', suggestion_accepted: 'Chấp nhận đề xuất chủ đề', suggestion_dismissed: 'Bỏ qua đề xuất chủ đề',
   assistant_run: 'Trợ lý AI chạy', assistant_settings: 'Cài đặt trợ lý AI', plan_regenerated: 'Lập lại kế hoạch tuần', ai_revised: 'AI viết lại theo góp ý',
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',
 };
@@ -1883,19 +1883,28 @@ async function renderKnowledge(box, d) {
       <div class="row"><span class="badge ${KKIND[i.kind][1]}">${KKIND[i.kind][0]}</span><b>${esc(i.title)}</b>${!i.page_id ? '<span class="badge off">Mọi Trang</span>' : ''}</div>
       <div class="small">${esc(i.digest || i.preview || '')}</div>
       <div class="muted small">${fmtTime(i.created_at)}${i.created_by_name ? ` · ${esc(i.created_by_name)}` : ''}${i.url ? ` · <a href="${esc(i.url)}" target="_blank" rel="noopener">Nguồn</a>` : ''}</div></div>
-      <div class="row">${k.can_edit ? `<button class="btn ghost sm" data-kedit="${i.id}">Sửa tóm tắt</button>` : ''}${isMgr() ? `<button class="btn ghost sm danger" data-kdel="${i.id}">Xóa</button>` : ''}</div></div>`).join('') : '<div class="muted">Chưa có kiến thức. Nạp tài liệu (hồ sơ năng lực, kế hoạch sự kiện, báo cáo, bài báo) để AI viết đúng dữ kiện.</div>'}</div>`;
+      <div class="row">${k.can_edit ? `<button class="btn ghost sm" data-kedit="${i.id}">Sửa</button>` : ''}${isMgr() ? `<button class="btn ghost sm danger" data-kdel="${i.id}">Xóa</button>` : ''}</div></div>`).join('') : '<div class="muted">Chưa có kiến thức. Nạp tài liệu (hồ sơ năng lực, kế hoạch sự kiện, báo cáo, bài báo) để AI viết đúng dữ kiện.</div>'}</div>`;
   const byId = Object.fromEntries(k.items.map((i) => [i.id, i]));
   box.querySelector('#addk')?.addEventListener('click', () => openKnowledgeForm(d));
   box.querySelector('#learn')?.addEventListener('click', async (e) => {
     e.target.disabled = true; e.target.textContent = 'Đang đọc tin…';
     try { const r = await api('/api/assistant/run', { method: 'POST', body: { page_id: d.page.id, steps: ['learn'] } }); toast(r.log?.[r.log.length - 1] || 'Đã đọc tin'); renderKnowledge(box, d); } catch (err) { toast(err.message); e.target.disabled = false; }
   });
-  box.querySelectorAll('[data-kedit]').forEach((b) => (b.onclick = () => {
-    const i = byId[b.dataset.kedit];
-    modal(`<h2>Sửa bản tóm tắt</h2><div class="muted small">${esc(i.title)}</div><textarea id="kd" rows="6">${esc(i.digest || '')}</textarea>
+  box.querySelectorAll('[data-kedit]').forEach((b) => (b.onclick = async () => {
+    let i = byId[b.dataset.kedit];
+    try { i = (await api(`/api/knowledge/${i.id}`)).item; } catch (e) { toast(e.message); return; }
+    modal(`<h2>Sửa tài liệu</h2>
+      <label for="kt2">Tên</label><input id="kt2" maxlength="200" value="${esc(i.title)}">
+      <label for="kb2">Nội dung (tối đa 20.000 ký tự)</label><textarea id="kb2" rows="12" maxlength="20000">${esc(i.body || '')}</textarea>
+      <label for="kd">Bản tóm tắt AI đọc khi viết bài</label><textarea id="kd" rows="5">${esc(i.digest || '')}</textarea>
+      <label class="check"><input type="checkbox" id="kre"> AI tóm tắt lại theo nội dung mới</label>
       <div class="actions"><button class="btn ghost" data-close>Hủy</button><button class="btn" data-save>Lưu</button></div>`, (m, close) => {
       m.querySelector('[data-close]').onclick = close;
-      m.querySelector('[data-save]').onclick = async () => { try { await api(`/api/knowledge/${i.id}`, { method: 'PATCH', body: { digest: m.querySelector('#kd').value } }); close(); renderKnowledge(box, d); } catch (e) { toast(e.message); } };
+      m.querySelector('[data-save]').onclick = async (e) => {
+        const re = m.querySelector('#kre').checked;
+        e.target.disabled = true; e.target.textContent = re ? 'AI đang tóm tắt…' : 'Đang lưu…';
+        try { await api(`/api/knowledge/${i.id}`, { method: 'PATCH', body: { title: m.querySelector('#kt2').value, body: m.querySelector('#kb2').value, ...(re ? { redigest: true } : { digest: m.querySelector('#kd').value }) } }); close(); renderKnowledge(box, d); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Lưu'; }
+      };
     });
   }));
   box.querySelectorAll('[data-kdel]').forEach((b) => (b.onclick = async () => {

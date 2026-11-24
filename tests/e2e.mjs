@@ -750,6 +750,13 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req('/api/knowledge', { method: 'POST', body: { page_id: '111', title: 'Lịch tập huấn tháng 12', body: 'Ngày 05/12/2026 tập huấn tại xã Krông Pắc cho 20 bà con, nội dung hồ sơ mã số vùng trồng.' } });
   assert.equal(r.status, 201, JSON.stringify(r.data));
   assert.equal(r.data.digest, 'Tóm tắt tài liệu thử');
+  const kid = r.data.id;
+  r = await owner.req(`/api/knowledge/${kid}`, { method: 'PATCH', body: { title: 'Lịch tập huấn tháng 12 (sửa)', body: 'Ngày 06/12/2026 tập huấn tại xã Krông Pắc, nội dung nhật ký vườn và truy xuất.', redigest: true } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req(`/api/knowledge/${kid}`);
+  assert.ok(r.data.item.body.includes('06/12') && r.data.item.title.endsWith('(sửa)'), 'sửa được nội dung tài liệu');
+  r = await viewer.req(`/api/knowledge/${kid}`);
+  assert.equal(r.status, 404, 'không xem tài liệu Trang không được giao');
   r = await viewer.req('/api/knowledge?page_id=222');
   assert.equal(r.data.items.length, 0, 'tài liệu riêng Trang A không hiện ở Trang B');
   // Trợ lý: chạy ngay → kế hoạch tuần, bài cho ngày mai ở trạng thái chờ duyệt, có lý do và kết quả tự kiểm tra

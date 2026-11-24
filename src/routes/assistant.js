@@ -158,7 +158,7 @@ async function selfCheck(env, { body, sub, st, campaign, stats = false }) {
   if (aiProvider(env) && aiProvider(env) !== 'workers') {
     try {
       const { text: out } = await generate(env, {
-        tier: 'fast', maxTokens: 2500,
+        tier: 'fast', maxTokens: 4000,
         system: 'Bạn là người kiểm duyệt bài đăng Fanpage. Đối chiếu bài với quy định và dữ kiện được phép dùng. Chỉ báo lỗi thật: bịa số liệu hoặc dữ kiện không có trong danh sách, sai quy định, thiếu hook hoặc CTA, câu sáo rỗng vô nghĩa, đoạn dài quá 2 câu. Trả JSON.',
         prompt: `[VIEC:check] QUY ĐỊNH:\n${cut(st.value, 2500)}\n\nDỮ KIỆN ĐƯỢC PHÉP DÙNG:\n${cut(sub?.facts || '', 1200)}\n\nCTA CỦA CHỦ ĐỀ: ${sub?.cta || '-'}\n\nLỖI ĐÃ PHÁT HIỆN BẰNG QUY TẮC: ${issues.join('; ') || 'không'}\n\nBÀI CẦN KIỂM TRA:\n${text}\n\nTrả JSON {"ok": true|false, "issues": ["lỗi ngắn gọn"], "fixed": "thân bài đã sửa nếu có lỗi, để trống nếu ok"}`,
       });
@@ -218,7 +218,7 @@ export async function learnNews(env, log = []) {
   const pick = fresh.slice(0, 6);
   if (!pick.length) { log.push('Không có tin mới khớp từ khóa chủ đề'); return log; }
   const digestReq = (tier) => generate(env, {
-    tier, maxTokens: 2000,
+    tier, maxTokens: 4000,
     system: 'Bạn đọc tin tức nông nghiệp cho người viết Fanpage FarmBase và Chiến dịch 10.000 ha (Đắk Lắk). Tóm tắt dữ kiện cụ thể dùng được (ai, làm gì, ở đâu, khi nào, số liệu). Không thêm ý ngoài tin. Tiếng Việt có dấu.',
     prompt: `[VIEC:digest] Với mỗi tin, viết tóm tắt 1–2 câu và cho biết có liên quan đến mã số vùng trồng, truy xuất, sầu riêng, cà phê, HTX, xuất khẩu nông sản Tây Nguyên không. Trả JSON {"items":[{"n":1,"digest":"...","relevant":true}]}\n\n${pick.map((it, i) => `[TIN ${i + 1}] ${cut(it.title, 160)} — ${cut(it.summary, 320)} — ${it.publisher || it.source}`).join('\n')}`,
   });

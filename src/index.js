@@ -82,6 +82,7 @@ const ROUTES = [
   ['DELETE', '/api/topics/:id', topics.deleteTopic],
   ['GET', '/api/knowledge', topics.listKnowledge],
   ['POST', '/api/knowledge', topics.createKnowledge],
+  ['GET', '/api/knowledge/:id', topics.getKnowledge],
   ['PATCH', '/api/knowledge/:id', topics.updateKnowledge],
   ['DELETE', '/api/knowledge/:id', topics.deleteKnowledge],
   ['GET', '/api/assistant', assistant.assistantState],

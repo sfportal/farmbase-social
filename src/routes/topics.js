@@ -196,7 +196,8 @@ async function digestOf(env, title, body) {
   if (!aiProvider(env)) return fallback;
   try {
     const { text } = await generate(env, {
-      tier: 'fast', maxTokens: 900,
+      // Haiku 5.5 có thể suy nghĩ trước khi trả lời: để dư token, tránh hết lượt trước khi viết bản tóm tắt.
+      tier: 'fast', maxTokens: 4000,
       system: 'Bạn tóm tắt tài liệu nội bộ cho người viết nội dung Fanpage nông nghiệp. Chỉ giữ dữ kiện cụ thể dùng được khi viết bài (số liệu có ngày, tên chương trình, quy định, điều được và không được nói). Không thêm ý ngoài tài liệu. Tiếng Việt có dấu.',
       prompt: `[VIEC:summary] Tóm tắt tài liệu "${title}" trong tối đa 120 từ, dạng các gạch đầu dòng ngắn. Trả về JSON {"digest": "..."}.\n\n${body.slice(0, 12000)}`,
     });
@@ -228,10 +229,22 @@ export async function updateKnowledge(request, env, user, id) {
   const row = await env.DB.prepare('SELECT * FROM social_knowledge WHERE id = ?').bind(Number(id)).first();
   if (!row || (row.page_id && !(await allowedPageIds(env, user)).includes(row.page_id))) throw new HttpError(404, 'Không tìm thấy', 'not_found');
   const b = await readJson(request);
-  const digest = String(b.digest || '').trim().slice(0, 1500);
-  await env.DB.prepare('UPDATE social_knowledge SET digest = ? WHERE id = ?').bind(digest, row.id).run();
-  await audit(env, request, user.id, 'knowledge_updated', row.title.slice(0, 80), { id: row.id });
-  return json({ ok: true });
+  const title = b.title !== undefined ? String(b.title).trim().slice(0, 200) || row.title : row.title;
+  const body = b.body !== undefined ? String(b.body).trim().slice(0, MAX_KNOWLEDGE_BODY) : row.body;
+  if (body.length < 20) throw new HttpError(400, 'Nội dung tài liệu ít nhất 20 ký tự', 'empty');
+  // Đổi nội dung hoặc bấm "AI tóm tắt lại" thì Claude Haiku tóm tắt lại; không thì giữ bản tóm tắt Quý khách sửa.
+  let digest = b.digest !== undefined ? String(b.digest).trim().slice(0, 1500) : row.digest;
+  if (b.redigest || (b.body !== undefined && body !== row.body && b.digest === undefined)) digest = await digestOf(env, title, body);
+  await env.DB.prepare('UPDATE social_knowledge SET title = ?, body = ?, digest = ? WHERE id = ?').bind(title, body, digest, row.id).run();
+  await audit(env, request, user.id, 'knowledge_updated', title.slice(0, 80), { id: row.id });
+  return json({ ok: true, digest });
+}
+
+// GET /api/knowledge/:id : xem đủ nội dung để sửa
+export async function getKnowledge(request, env, user, id) {
+  const row = await env.DB.prepare('SELECT id, page_id, kind, title, body, digest, url, created_at FROM social_knowledge WHERE id = ?').bind(Number(id)).first();
+  if (!row || (row.page_id && !(await allowedPageIds(env, user)).includes(row.page_id))) throw new HttpError(404, 'Không tìm thấy', 'not_found');
+  return json({ item: row, can_edit: canEdit(user) });
 }
 
 // DELETE /api/knowledge/:id
