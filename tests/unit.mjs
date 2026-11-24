@@ -126,5 +126,10 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
   assert.ok(adLibraryUrl({ name: 'Hợp Trí', keywords: '' }).includes(`q=${encodeURIComponent('Hợp Trí')}`));
   assert.equal(mentions({ title: 'Qcert ra mắt dịch vụ', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), true);
   assert.equal(mentions({ title: 'Giá sầu riêng hôm nay', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), false);
+  const { fetchCost } = await import('../src/routes/competitors.js');
+  const T = 2_000_000_000;
+  assert.equal(fetchCost({ keywords: 'X', website: 'https://a.vn', feed_url: 'https://a.vn/feed' }, T), 2);
+  assert.equal(fetchCost({ keywords: 'X', website: 'https://a.vn', feed_type: 'none', feed_checked_at: T - 86400 }, T), 1, 'website không có RSS: 7 ngày mới dò lại');
+  assert.equal(fetchCost({ keywords: 'X', website: 'https://a.vn', feed_type: 'none', feed_checked_at: T - 8 * 86400 }, T), 15);
 }
 console.log('unit: đạt');

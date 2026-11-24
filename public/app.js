@@ -502,7 +502,7 @@ async function viewCompetitors() {
   });
   document.getElementById('cfetch')?.addEventListener('click', async (e) => {
     e.target.disabled = true; e.target.textContent = 'Đang cập nhật…';
-    try { const r = await api('/api/competitors/fetch', { method: 'POST', body: {} }); toast(`Đã cập nhật: ${r.total} mục mới`); viewCompetitors(); }
+    try { const r = await api('/api/competitors/fetch', { method: 'POST', body: {} }); toast(`Đã cập nhật: ${r.total} mục mới${r.left ? `, còn ${r.left} đối thủ sẽ cập nhật ở lần sau` : ''}`); viewCompetitors(); }
     catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Cập nhật ngay'; }
   });
   document.getElementById('cadd')?.addEventListener('click', () => openCompetitor(null));

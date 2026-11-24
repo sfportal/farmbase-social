@@ -127,7 +127,7 @@ export async function updateCompetitor(request, env, user, id) {
   const c = readCompetitor({ ...old, ...body }, env);
   const active = body.active === undefined ? old.active : (body.active ? 1 : 0);
   const feedReset = c.website !== old.website;
-  await env.DB.prepare(`UPDATE social_competitors SET name = ?, kind = ?, fb_url = ?, fb_page_id = ?, keywords = ?, website = ?, note = ?, active = ?${feedReset ? ', feed_url = NULL, feed_type = NULL' : ''} WHERE id = ?`)
+  await env.DB.prepare(`UPDATE social_competitors SET name = ?, kind = ?, fb_url = ?, fb_page_id = ?, keywords = ?, website = ?, note = ?, active = ?${feedReset ? ', feed_url = NULL, feed_type = NULL, feed_checked_at = NULL' : ''} WHERE id = ?`)
     .bind(c.name, c.kind, c.fb_url, c.fb_page_id, c.keywords, c.website, c.note, active, old.id).run();
   await audit(env, request, user.id, 'competitor_updated', c.name, { id: old.id });
   return json({ ok: true });
@@ -218,12 +218,17 @@ export function mentions(it, c) {
 export async function fetchCompetitor(env, c, log = []) {
   const t = now(); const since = t - KEEP_DAYS * 86400;
   let added = 0; const errs = [];
-  if (c.website) {
+  // Website không có RSS: đánh dấu 'none', 7 ngày mới dò lại (mỗi lần dò tốn nhiều lượt gọi ra ngoài).
+  if (c.website && (c.feed_type !== 'none' || websiteRecheckDue(c, t))) {
     try {
       let feed = c.feed_url ? { feed_url: c.feed_url, feed_type: c.feed_type } : null;
       if (!feed) {
-        feed = await discover(safeUrl(c.website, env));
-        await env.DB.prepare('UPDATE social_competitors SET feed_url = ?, feed_type = ? WHERE id = ?').bind(feed.feed_url, feed.feed_type, c.id).run();
+        try { feed = await discover(safeUrl(c.website, env)); }
+        catch (e) {
+          if (!/subrequest/i.test(e.message)) await env.DB.prepare("UPDATE social_competitors SET feed_url = NULL, feed_type = 'none', feed_checked_at = ? WHERE id = ?").bind(t, c.id).run();
+          throw e;
+        }
+        await env.DB.prepare('UPDATE social_competitors SET feed_url = ?, feed_type = ?, feed_checked_at = ? WHERE id = ?').bind(feed.feed_url, feed.feed_type, t, c.id).run();
       }
       const r = await fetchText(feed.feed_url, feed.feed_type === 'wp' ? 'application/json' : 'application/rss+xml,application/xml,*/*');
       const list = feed.feed_type === 'wp' ? parseWp(JSON.parse(r.text)) : parseFeed(r.text);
@@ -241,11 +246,29 @@ export async function fetchCompetitor(env, c, log = []) {
   return added;
 }
 
-export async function runCompetitors(env, { ids = null } = {}) {
-  const { results } = await env.DB.prepare('SELECT * FROM social_competitors WHERE active = 1 ORDER BY id').all();
-  const log = []; let total = 0;
-  for (const c of results.filter((x) => !ids || ids.includes(x.id))) total += await fetchCompetitor(env, c, log);
-  return { total, log };
+// Mỗi lần chạy Worker chỉ được gọi ra ngoài khoảng 50 lượt (gói miễn phí), nên chạy theo lượt:
+// đối thủ lâu chưa cập nhật đi trước, ước tính số lượt gọi của từng đối thủ, đủ ngân sách thì dừng, phần còn lại để lần sau.
+const FETCH_BUDGET = 40;
+export function websiteRecheckDue(c, t) { return !c.feed_checked_at || t - c.feed_checked_at >= 7 * 86400; }
+export function fetchCost(c, t) {
+  let n = c.keywords ? 1 : 0;
+  if (c.website) n += c.feed_url ? 1 : (c.feed_type === 'none' && !websiteRecheckDue(c, t)) ? 0 : 14;
+  return n;
+}
+export async function runCompetitors(env, { ids = null, staleHours = 0 } = {}) {
+  const t = now();
+  const { results } = await env.DB.prepare('SELECT * FROM social_competitors WHERE active = 1 ORDER BY COALESCE(last_fetch_at, 0), id').all();
+  const todo = results.filter((x) => (!ids || ids.includes(x.id)) && (!staleHours || !x.last_fetch_at || t - x.last_fetch_at >= staleHours * 3600));
+  const log = []; let total = 0; let used = 0; let done = 0;
+  for (const c of todo) {
+    const cost = fetchCost(c, t);
+    if (done && used + cost > FETCH_BUDGET) break;
+    used += cost; done++;
+    total += await fetchCompetitor(env, c, log);
+  }
+  const left = todo.length - done;
+  if (left) log.push(`Còn ${left} đối thủ sẽ cập nhật ở lần chạy sau.`);
+  return { total, log, left };
 }
 
 // POST /api/competitors/fetch { competitor_id? }
