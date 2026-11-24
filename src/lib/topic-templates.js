@@ -19,7 +19,7 @@ Hai phần: trang quản lý web cho HTX, doanh nghiệp và Zalo Mini App cho b
 Tagline: "Dữ liệu vườn trồng, minh bạch từ gốc" (ngắn: "Minh bạch từ gốc").
 Đối tượng: bà con trồng sầu riêng, cà phê; HTX, tổ hợp tác; doanh nghiệp thu mua, cơ sở đóng gói; cán bộ xã.
 Giọng văn: rõ ràng, gần gũi với bà con, chuyên nghiệp với doanh nghiệp. Mở bằng nỗi đau cụ thể (người mua hỏi nguồn gốc, thiếu nhật ký, hồ sơ rời rạc, thị trường đòi truy xuất).
-TRỌNG TÂM: truy xuất nguồn gốc (khoảng 40% bài). Mã số vùng trồng chỉ là nội dung phụ (khoảng 10%), không lấy làm chủ đề chính.
+TRỌNG TÂM: truy xuất nguồn gốc (khoảng 40% bài). Mã số vùng trồng chỉ là nội dung phụ (khoảng 15%), không lấy làm chủ đề chính.
 BẮT BUỘC: ${CAP_MA} Đồng bộ hệ thống truy xuất quốc gia chỉ áp dụng cho vùng đã có mã. GS1 và module cơ sở đóng gói ghi "dự kiến 11/2026". Không dùng tên DurianBase. Không viết "100% nông hộ vùng 07". Không dùng "số 1", "duy nhất", "hàng đầu". Không quảng bá tính năng không có (AI chẩn đoán bệnh, dự báo năng suất, sàn mua bán). Không công khai tên, số điện thoại của bà con. Không nêu số nông hộ, diện tích, số vùng trồng FarmBase đã triển khai, trừ khi người duyệt yêu cầu. Hạn chế nhắc dữ liệu cá nhân (CCCD, sổ đỏ, giấy tờ đất). Tránh nội dung pháp lý như ủy quyền, tranh chấp đất, thủ tục pháp lý về mã số vùng trồng.
 Số liệu triển khai (CHỈ dùng khi người duyệt yêu cầu): trên 1.500 nông hộ, khoảng 1.600 ha, 66 vùng trồng tại Đắk Lắk (số liệu 28/10/2026).
 Liên hệ: Hotline BVI 0944 374 068 · info@bvi.vn · https://farmbase.vn`;
@@ -246,7 +246,7 @@ export const TEMPLATES = {
             prompt_ids: 'fb-04,fu-08,vt-04', storyboard_id: 'demo-khach', ads: 'Mục tiêu: Khách hàng tiềm năng; tệp quản lý HTX, doanh nghiệp nông sản.',
             keywords: 'phần mềm quản lý vùng trồng' }),
         ] },
-      { title: 'Câu chuyện và bằng chứng thực tế', share: 20, goal: 'Niềm tin: chứng minh bằng hình ảnh thật và báo chí', audience: 'HTX, doanh nghiệp, cán bộ xã', message: 'Đang triển khai thật tại Đắk Lắk, có hình ảnh thực địa và báo chí ghi nhận',
+      { title: 'Câu chuyện và bằng chứng thực tế', share: 15, goal: 'Niềm tin: chứng minh bằng hình ảnh thật và báo chí', audience: 'HTX, doanh nghiệp, cán bộ xã', message: 'Đang triển khai thật tại Đắk Lắk, có hình ảnh thực địa và báo chí ghi nhận',
         children: [
           T({ title: 'Hành trình số hóa một vùng trồng', goal: 'Tạo niềm tin bằng cách làm thật, không cần con số', audience: 'HTX, doanh nghiệp',
             hook: 'Từ sổ ghi chép giấy đến trang truy xuất có QR: một vùng trồng số hóa thế nào?',
@@ -306,7 +306,7 @@ export const TEMPLATES = {
             prompt_ids: 'ha-01', storyboard_id: '', ads: 'Không cần ads.',
             keywords: '' }),
         ] },
-      { title: 'Mã số vùng trồng: hiểu đúng, làm đúng', share: 10, goal: 'Giáo dục: bà con, HTX hiểu đúng mã số vùng trồng và việc duy trì', audience: 'Bà con, HTX', message: 'Hiểu đúng mã số vùng trồng, chuẩn bị hồ sơ đúng cách, duy trì bằng nhật ký đều',
+      { title: 'Mã số vùng trồng: hiểu đúng, làm đúng', share: 15, goal: 'Giáo dục: bà con, HTX hiểu đúng mã số vùng trồng và việc duy trì', audience: 'Bà con, HTX', message: 'Hiểu đúng mã số vùng trồng, chuẩn bị hồ sơ đúng cách, duy trì bằng nhật ký đều',
         children: [
           T({ title: 'Mã số vùng trồng là gì và 5 bước BVI hỗ trợ', goal: 'Hiểu khái niệm, quy trình, liên hệ tư vấn', audience: 'Bà con, HTX mới tìm hiểu',
             hook: 'Làm hồ sơ mã số vùng trồng bắt đầu từ đâu?\n5 bước từ khảo sát đến duy trì sau khi có mã.',
