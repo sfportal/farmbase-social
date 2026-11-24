@@ -136,6 +136,7 @@ export async function deleteTopic(request, env, user, id) {
   const row = await loadTopic(env, user, id);
   await env.DB.batch([
     env.DB.prepare('UPDATE social_content SET topic_id = NULL WHERE topic_id IN (SELECT id FROM social_topics WHERE id = ? OR parent_id = ?)').bind(row.id, row.id),
+    env.DB.prepare('UPDATE social_media SET topic_id = NULL WHERE topic_id IN (SELECT id FROM social_topics WHERE id = ? OR parent_id = ?)').bind(row.id, row.id),
     env.DB.prepare('DELETE FROM social_topic_suggestions WHERE topic_id IN (SELECT id FROM social_topics WHERE id = ? OR parent_id = ?) OR parent_id = ?').bind(row.id, row.id, row.id),
     env.DB.prepare('DELETE FROM social_topics WHERE parent_id = ?').bind(row.id),
     env.DB.prepare('DELETE FROM social_topics WHERE id = ?').bind(row.id),
@@ -149,8 +150,18 @@ export async function seedTopics(request, env, user) {
   requireRole(user, 'owner', 'manager');
   const body = await readJson(request);
   const page = await pageFor(env, user, body.page_id);
-  await seedTemplate(env, page.id, String(body.template || ''), user.id);
-  await audit(env, request, user.id, 'topics_seeded', page.name, { template: body.template });
+  const key = String(body.template || '');
+  if (!TEMPLATES[key]) throw new HttpError(400, 'Không có bộ mẫu này', 'bad_template');
+  if (body.replace === true) {
+    // Thay bộ mẫu: xóa chủ đề cũ của Trang (bài đã soạn giữ nguyên, chỉ bỏ liên kết chủ đề) và thay Hồ sơ Fanpage.
+    await env.DB.prepare('UPDATE social_content SET topic_id = NULL WHERE page_id = ? AND topic_id IS NOT NULL').bind(page.id).run();
+    await env.DB.prepare('UPDATE social_media SET topic_id = NULL WHERE page_id = ? AND topic_id IS NOT NULL').bind(page.id).run();
+    await env.DB.prepare('DELETE FROM social_topics WHERE page_id = ? AND parent_id IS NOT NULL').bind(page.id).run();
+    await env.DB.prepare('DELETE FROM social_topics WHERE page_id = ?').bind(page.id).run();
+    await setBrief(env, page.id, TEMPLATES[key].brief, user.id);
+  }
+  await seedTemplate(env, page.id, key, user.id);
+  await audit(env, request, user.id, body.replace === true ? 'topics_replaced' : 'topics_seeded', page.name, { template: key });
   return json({ ok: true });
 }
 
@@ -253,9 +264,15 @@ export async function decideSuggestion(request, env, user, id, decision) {
   if (s.status !== 'pending') throw new HttpError(409, 'Đề xuất đã được xử lý', 'done');
   const t = now();
   if (decision === 'accept') {
-    const f = cleanTopic(parseJson(s.payload) || {}, true);
+    const raw = parseJson(s.payload) || {};
+    const f = cleanTopic(raw, true);
     delete f.share; delete f.status; delete f.sort;
-    if (s.action === 'update' && s.topic_id) {
+    if (Array.isArray(raw.shares)) {
+      // Cân chỉnh tỷ trọng các chủ đề cha
+      const stmts = raw.shares.map((x) => env.DB.prepare('UPDATE social_topics SET share = ?, updated_at = ? WHERE id = ? AND page_id = ? AND parent_id IS NULL')
+        .bind(Math.max(0, Math.min(100, Math.round(Number(x.share) || 0))), t, Number(x.topic_id), s.page_id));
+      if (stmts.length) await env.DB.batch(stmts);
+    } else if (s.action === 'update' && s.topic_id) {
       const keys = Object.keys(f).filter((k) => f[k]);
       if (keys.length) await env.DB.prepare(`UPDATE social_topics SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ? AND page_id = ?`).bind(...keys.map((k) => f[k]), t, s.topic_id, s.page_id).run();
     } else {

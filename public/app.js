@@ -103,6 +103,7 @@ const I = {
   src: '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/><path d="m15 15 2 2 3-3"/>',
   topic: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="12" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M8.5 6H12v12H8.5M12 12h3.5"/>',
   bot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 17h5"/>',
+  media: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
 
@@ -112,7 +113,7 @@ function navItems() {
     { r: 'tong-quan', label: 'Tổng quan', ic: 'home' },
     { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox' },
     { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal' },
-    ...(me.role !== 'agent' ? [{ r: 'tro-ly', label: 'Trợ lý AI', ic: 'bot' }, { r: 'chu-de', label: 'Chủ đề nội dung', ic: 'topic' }, { r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src' }] : []),
+    ...(me.role !== 'agent' ? [{ r: 'tro-ly', label: 'Trợ lý AI', ic: 'bot' }, { r: 'chu-de', label: 'Chủ đề nội dung', ic: 'topic' }, { r: 'kho-media', label: 'Kho ảnh, video', ic: 'media' }, { r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src' }] : []),
     { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule' },
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
@@ -492,8 +493,10 @@ const calState = { status: '', page: '', view: 'list', month: '', focus: null };
 const toLocalInput = (t) => { if (!t) return ''; const d = new Date(t * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 const dayKey = (t) => new Date(t * 1000).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
 
-async function uploadFile(file) {
-  const res = await fetch(`/api/media?name=${encodeURIComponent(file.name)}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
+async function uploadFile(file, opt = {}) {
+  const qs = new URLSearchParams({ name: file.name });
+  for (const k of ['page_id', 'topic_id', 'source', 'note']) if (opt[k]) qs.set(k, opt[k]);
+  const res = await fetch(`/api/media?${qs}`, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Tải lên lỗi, vui lòng thử lại');
   return data;
@@ -543,7 +546,7 @@ function contentForm(pages, item, perms, pre) {
       <label>Ảnh hoặc video</label>
       ${perms.media_enabled
         ? `<div class="media-pick"><div class="media-list" id="mlist"></div>
-            <label class="btn ghost sm upl">Tải ảnh, video lên<input id="mfile" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime" multiple hidden></label>
+            <div class="row"><label class="btn ghost sm upl">Tải ảnh, video lên<input id="mfile" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime" multiple hidden></label><button type="button" class="btn ghost sm" id="mlib">Chọn từ kho</button></div>
             <div class="muted small">Tối đa 10 ảnh (mỗi ảnh 10 MB) hoặc 1 video MP4 (95 MB). Có ảnh hoặc video thì nội dung làm chú thích.</div><div id="mmsg"></div></div>`
         : '<div class="muted small">Chưa bật kho lưu ảnh, video. Tạm thời dán đường dẫn ảnh công khai bên dưới.</div>'}
       <label for="img">Hoặc địa chỉ ảnh có sẵn (không bắt buộc)</label><input id="img" type="url" placeholder="https://… .jpg" value="${esc(v.image_url || '')}">
@@ -597,7 +600,7 @@ function openContentForm(pages, item, perms, pre) {
     f.msg.oninput = () => { upd(); clearTimeout(syncT); syncT = setTimeout(drawVariants, 200); };
     upd();
     m.querySelector('[data-close]').onclick = close;
-    const media = [...(item?.media || [])];
+    const media = [...(item?.media || pre?.media || [])];
     const mlist = m.querySelector('#mlist');
     const drawMedia = () => {
       if (!mlist) return;
@@ -613,12 +616,18 @@ function openContentForm(pages, item, perms, pre) {
       mfile.value = '';
       for (const [i, file] of files.entries()) {
         mmsg.innerHTML = `<div class="muted small">Đang tải ${i + 1}/${files.length}: ${esc(file.name)}…</div>`;
-        try { media.push((await uploadFile(file)).media); drawMedia(); }
+        try { media.push((await uploadFile(file, { page_id: pickedPages()[0] || '', topic_id: item?.topic_id || '' })).media); drawMedia(); }
         catch (e) { mmsg.innerHTML = `<div class="alert err small">${esc(file.name)}: ${esc(e.message)}</div>`; return; }
       }
       mmsg.innerHTML = '';
     };
     const pickedPages = () => (item ? [item.page_id] : [...f.querySelectorAll('input[name=pg]:checked')].map((i) => i.value));
+    const mlib = m.querySelector('#mlib');
+    if (mlib) mlib.onclick = () => {
+      const pid = pickedPages()[0];
+      if (!pid) { m.querySelector('#mmsg').innerHTML = '<div class="alert err small">Vui lòng chọn Fanpage trước.</div>'; return; }
+      pickMedia(pid, (picked) => { for (const x of picked) if (!media.some((y) => y.id === x.id)) media.push(x); drawMedia(); });
+    };
     const runAi = async (rewrite) => {
       const aimsg = m.querySelector('#aimsg');
       const brief = f.brief.value.trim();
@@ -1610,9 +1619,9 @@ const ACTIONS = {
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
   post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
-  media_uploaded: 'Tải ảnh/video lên', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
+  media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
-  topics_seeded: 'Nạp bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
+  topics_seeded: 'Nạp bộ chủ đề mẫu', topics_replaced: 'Thay bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
   knowledge_added: 'Nạp tài liệu', knowledge_updated: 'Sửa tóm tắt kiến thức', knowledge_deleted: 'Xóa kiến thức', suggestion_accepted: 'Chấp nhận đề xuất chủ đề', suggestion_dismissed: 'Bỏ qua đề xuất chủ đề',
   assistant_run: 'Trợ lý AI chạy', assistant_settings: 'Cài đặt trợ lý AI', plan_regenerated: 'Lập lại kế hoạch tuần', ai_revised: 'AI viết lại theo góp ý',
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',
@@ -1733,7 +1742,7 @@ function renderTopicTree(box, d, lib) {
       <div class="row">${isMgr() ? `${tplPick}<button class="btn" id="seed">Nạp bộ mẫu</button>` : ''}${d.can_edit ? '<button class="btn ghost" id="addtop">Tạo chủ đề</button>' : ''}</div></div>`;
   } else {
     box.innerHTML = `<div class="card row between"><div class="muted small">${d.topics.length} chủ đề, ${d.topics.reduce((a, t) => a + t.children.length, 0)} chủ đề con · tổng tỷ trọng ${total}%${total !== 100 ? ' (nên bằng 100%)' : ''}. Trợ lý AI chỉ soạn bài theo chủ đề con đang bật.</div>
-      <div class="row">${d.can_edit ? '<button class="btn sm" id="addtop">Thêm chủ đề</button>' : ''}<a class="btn ghost sm" href="#/tro-ly">Trợ lý AI</a></div></div>
+      <div class="row">${d.can_edit ? '<button class="btn sm" id="addtop">Thêm chủ đề</button>' : ''}${isMgr() && d.suggested_template ? '<button class="btn ghost sm" id="reseed">Thay bằng bộ mẫu mới nhất</button>' : ''}<a class="btn ghost sm" href="#/tro-ly">Trợ lý AI</a></div></div>
       ${d.topics.map((t) => `<section class="card topic ${t.status === 'paused' ? 'paused' : ''}">
         <div class="row between thead2"><div class="grow"><h2 style="margin:0">${esc(t.title)} ${t.share ? `<span class="badge">${t.share}%</span>` : ''} ${t.status === 'paused' ? '<span class="badge off">Tạm dừng</span>' : ''}</h2>
           ${t.goal ? `<div class="muted small">${esc(t.goal)}</div>` : ''}${t.message ? `<div class="small">Thông điệp: ${esc(t.message)}</div>` : ''}</div>
@@ -1750,6 +1759,12 @@ function renderTopicTree(box, d, lib) {
   box.querySelector('#seed')?.addEventListener('click', async (e) => {
     e.target.disabled = true;
     try { await api('/api/topics/seed', { method: 'POST', body: { page_id: d.page.id, template: box.querySelector('#tpl').value } }); toast('Đã nạp bộ chủ đề mẫu'); render(); } catch (err) { toast(err.message); e.target.disabled = false; }
+  });
+  box.querySelector('#reseed')?.addEventListener('click', async (e) => {
+    const name = d.templates.find((t) => t.key === d.suggested_template)?.name || '';
+    if (!(await confirmBox('Thay bằng bộ mẫu mới nhất?', `Toàn bộ chủ đề hiện tại của Trang sẽ bị xóa và thay bằng bộ mẫu "${name}" mới nhất; Hồ sơ Fanpage cũng được thay theo bộ mẫu. Bài đã soạn vẫn giữ nguyên. Không khôi phục được chủ đề cũ.`, 'Thay bộ mẫu', true))) return;
+    e.target.disabled = true;
+    try { await api('/api/topics/seed', { method: 'POST', body: { page_id: d.page.id, template: d.suggested_template, replace: true } }); toast('Đã thay bằng bộ chủ đề mẫu mới nhất'); render(); } catch (err) { toast(err.message); e.target.disabled = false; }
   });
   box.querySelector('#addtop')?.addEventListener('click', () => openTopicForm(d, null, null, lib));
   box.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => openTopicForm(d, byId[b.dataset.edit], null, lib)));
@@ -1901,11 +1916,12 @@ function openKnowledgeForm(d) {
 async function renderSuggestions(box, d) {
   box.innerHTML = '<div class="muted">Đang tải…</div>';
   const s = await api(`/api/topics/suggestions?page_id=${encodeURIComponent(d.page.id)}`);
-  const F = { title: 'Tên', hook: 'Hook', message: 'Thông điệp', cta: 'CTA', facts: 'Dữ kiện mới', keywords: 'Từ khóa' };
-  box.innerHTML = `<div class="card row between"><div class="muted small">Trợ lý đọc tin tức, tài liệu và góp ý rồi đề xuất cập nhật chủ đề vào sáng thứ Hai. Quý khách chấp nhận thì chủ đề được cập nhật, bỏ qua thì giữ nguyên.</div>
+  const F = { title: 'Tên', hook: 'Hook', message: 'Thông điệp', cta: 'CTA', facts: 'Dữ kiện mới', formats: 'Định dạng', keywords: 'Từ khóa' };
+  box.innerHTML = `<div class="card row between"><div class="muted small">Trợ lý xem tương tác bài đã đăng (7, 15, 30 ngày), tin tức, tài liệu và góp ý rồi đề xuất cân chỉnh chủ đề vào sáng thứ Hai và thứ Năm. Quý khách chấp nhận thì chủ đề được cập nhật, bỏ qua thì giữ nguyên.</div>
     ${isMgr() ? '<button class="btn ghost sm" id="sugnow">Đề xuất ngay</button>' : ''}</div>
-    ${s.items.length ? s.items.map((x) => `<div class="card sugg"><div class="row between"><b>${x.action === 'new' ? `Thêm chủ đề con${x.parent_title ? ` vào "${esc(x.parent_title)}"` : ''}` : `Cập nhật "${esc(x.topic_title || '')}"`}</b><span class="muted small">${fmtTime(x.created_at)}</span></div>
+    ${s.items.length ? s.items.map((x) => `<div class="card sugg"><div class="row between"><b>${Array.isArray(x.payload.shares) ? 'Cân chỉnh tỷ trọng chủ đề' : x.action === 'new' ? `Thêm chủ đề con${x.parent_title ? ` vào "${esc(x.parent_title)}"` : ''}` : `Cập nhật "${esc(x.topic_title || '')}"`}</b><span class="muted small">${fmtTime(x.created_at)}</span></div>
       ${x.reason ? `<div class="small">Lý do: ${esc(x.reason)}</div>` : ''}
+      ${Array.isArray(x.payload.shares) ? `<div class="tf"><div class="muted small">Cân chỉnh tỷ trọng chủ đề</div>${x.payload.shares.map((r) => `<div class="small">${esc(r.title)}: ${r.old}% → <b>${r.share}%</b></div>`).join('')}</div>` : ''}
       <div class="tgrid">${Object.entries(F).filter(([k]) => x.payload[k]).map(([k, l]) => `<div class="tf"><div class="muted small">${l}</div><div class="pre small">${esc(x.payload[k])}</div></div>`).join('')}</div>
       ${d.can_edit ? `<div class="row"><button class="btn sm" data-acc="${x.id}">Chấp nhận</button><button class="btn ghost sm" data-dis="${x.id}">Bỏ qua</button></div>` : ''}</div>`).join('') : '<div class="card muted">Chưa có đề xuất nào đang chờ.</div>'}`;
   box.querySelector('#sugnow')?.addEventListener('click', async (e) => {
@@ -1930,6 +1946,36 @@ function renderBrief(box, d) {
 
 // ---------- Trợ lý AI: kế hoạch tuần, bài cho ngày mai, tự kiểm tra, góp ý ----------
 const DSTATUS = { pending: ['Chờ duyệt', 'warn'], draft: ['Nháp', 'off'], scheduled: ['Đã hẹn giờ', 'ok'], published: ['Đã đăng', 'ok'], rejected: ['Từ chối', 'err'], failed: ['Lỗi', 'err'] };
+const MODEL_NAME = (id, choices) => choices.find((c) => c.id === id)?.name || id;
+function modelBox(a) {
+  const ch = a.model_choices || [];
+  const usd = (n) => `${n.toLocaleString('vi-VN', { maximumFractionDigits: 4 })} USD`;
+  const opts = (sel) => ch.map((c) => `<option value="${esc(c.id)}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}: ${esc(c.note)}</option>`).join('');
+  const per = ch.find((c) => c.id === a.models.write)?.per_post;
+  const info = `<div class="small">Viết bài, kế hoạch tuần: <b>${esc(MODEL_NAME(a.models.write, ch))}</b> · Tóm tắt tin, tự kiểm tra, đề xuất: <b>${esc(MODEL_NAME(a.models.fast, ch))}</b></div>
+    ${per ? `<div class="muted small">Ước tính mỗi bài khoảng ${usd(per)}; 2 Trang, mỗi ngày 1 bài, cả tháng khoảng ${usd(Math.round(per * 60 * 100 + 30) / 100)} (đã gồm kế hoạch tuần).</div>` : ''}`;
+  if (!a.can_models) return info;
+  return `${info}<details class="pfb"><summary>Đổi model Claude</summary>
+    <label for="mw">Viết bài, kế hoạch tuần</label><select id="mw">${opts(a.models.write)}</select>
+    <label for="mf">Việc nhanh (tóm tắt tin, tự kiểm tra, đề xuất)</label><select id="mf">${opts(a.models.fast)}</select>
+    <div class="muted small">Giá tham khảo cho 1 triệu token (vào/ra): ${ch.map((c) => `${esc(c.name)} ${c.price[0]}/${c.price[1]} USD`).join(' · ')}. Khuyên dùng: Sonnet để viết bài, Haiku cho việc nhanh. Muốn tiết kiệm tối đa: chọn Haiku cho cả hai.</div>
+    <button class="btn sm" id="msave2">Lưu model</button></details>`;
+}
+
+function engagementHtml(a) {
+  const e = a.engagement;
+  if (!e) return '';
+  if (!e.windows?.length) return `<div class="card"><h2>Tương tác bài đã đăng</h2><div class="muted small">${e.error ? `Chưa đọc được số liệu từ Facebook: ${esc(e.error)}` : 'Chưa có bài nào trong 30 ngày qua.'}</div></div>`;
+  const w = e.windows.map((x) => `<div class="stat"><span class="muted small">${x.days} ngày qua</span><span class="n">${fmtNum(x.posts)} bài</span><span class="small">${fmtNum(x.engagement)} tương tác · TB ${fmtNum(x.avg)}/bài</span></div>`).join('');
+  const tp = (e.topics || []).filter((t) => t.share || t.posts).map((t) => `<tr><td data-l="Chủ đề">${esc(t.title)}</td><td data-l="Kế hoạch">${t.share}%</td><td data-l="Thực tế">${t.posts ? `${t.actual}% (${t.posts} bài)` : '–'}</td><td data-l="TB tương tác">${t.posts ? fmtNum(t.avg) : '–'}</td></tr>`).join('');
+  const pl = (list) => list.map((p) => `<div class="small">• <b>${fmtNum(p.engagement)}</b> ${p.permalink_url ? `<a href="${esc(p.permalink_url)}" target="_blank" rel="noopener">${esc(p.line || '(không có chữ)')}</a>` : esc(p.line)}${p.topic ? ` <span class="muted">[${esc(p.topic)}]</span>` : ''}</div>`).join('');
+  return `<section class="card eng"><div class="row between"><h2 style="margin:0">Tương tác bài đã đăng</h2><span class="muted small">cập nhật ${fmtTime(e.at)}${e.error ? ' · lần đọc gần nhất lỗi' : ''}</span></div>
+    <div class="grid g3">${w}</div>
+    ${tp ? `<h3>Theo chủ đề (30 ngày, ${e.tagged}/${e.total} bài do hệ thống đăng có gắn chủ đề)</h3><div class="tscroll"><table class="cards"><thead><tr><th>Chủ đề</th><th>Tỷ trọng kế hoạch</th><th>Thực tế</th><th>TB tương tác/bài</th></tr></thead><tbody>${tp}</tbody></table></div>` : ''}
+    <div class="grid g2">${e.top?.length ? `<div><h3>Tương tác cao</h3>${pl(e.top)}</div>` : ''}${e.low?.length ? `<div><h3>Tương tác thấp</h3>${pl(e.low)}</div>` : ''}</div>
+    <div class="muted small">Trợ lý dùng số liệu này khi lập kế hoạch, soạn bài, và đề xuất cân chỉnh chủ đề vào sáng thứ Hai, thứ Năm. Đề xuất chỉ áp dụng khi Quý khách bấm Chấp nhận.</div>
+    ${a.can_run ? '<div class="row"><button class="btn ghost sm" id="engsug">Phân tích và đề xuất cân chỉnh chủ đề</button></div>' : ''}</section>`;
+}
 async function viewAssistant() {
   layout('tro-ly', 'Trợ lý AI', 'Mỗi sáng 7h00: đọc tin, lập kế hoạch tuần, soạn bài cho ngày mai để Quý khách duyệt trong ngày', '<div class="muted">Đang tải…</div>');
   const pick = await topicPagePick();
@@ -1981,12 +2027,20 @@ async function viewAssistant() {
       <div class="muted small">Lần chạy gần nhất: ${a.last_run ? fmtTime(a.last_run) : 'chưa chạy'}</div>${a.last_log.length ? `<details><summary class="small">Nhật ký lần chạy</summary>${a.last_log.map((l) => `<div class="small">• ${esc(l)}</div>`).join('')}</details>` : ''}</div>
     <div class="card"><h2>AI và chi phí tháng ${esc(usage.month.slice(5))}/${esc(usage.month.slice(0, 4))}</h2>
       <div>AI đang dùng: <b>${esc(a.provider || 'chưa cài')}</b></div>
-      ${a.models ? `<div class="muted small">Viết bài, kế hoạch: ${esc(a.models.write)} · Tóm tắt tin, tự kiểm tra, đề xuất: ${esc(a.models.fast)}</div>` : `<div class="muted small">${me.role === 'owner' ? 'Để dùng Claude: thêm biến bí mật ANTHROPIC_API_KEY trong Cloudflare (Worker farmbase-social, Settings, Variables and Secrets). Chưa có thì hệ thống dùng Workers AI miễn phí.' : ''}</div>`}
+      ${a.models ? modelBox(a) : `<div class="muted small">${me.role === 'owner' ? 'Để dùng Claude: thêm biến bí mật ANTHROPIC_API_KEY trong Cloudflare (Worker farmbase-social, Settings, Variables and Secrets). Chưa có thì hệ thống dùng Workers AI miễn phí.' : ''}</div>`}
       <div class="stat"><span class="n">${usage.usd ? `~${usage.usd.toLocaleString('vi-VN')} USD` : '0 USD'}</span> <span class="muted small">ước tính tháng này${usage.rows.length ? ` · ${usage.rows.reduce((x, r) => x + r.calls, 0)} lượt gọi` : ''}</span></div>
       <div class="muted small">Tiết kiệm: Haiku cho việc nhanh, Sonnet chỉ khi viết bài; AI chỉ đọc bản tóm tắt chủ đề và kiến thức; phần hướng dẫn cố định được cache; mỗi Trang 1 lần lập kế hoạch mỗi tuần và 1 lần soạn bài mỗi ngày.</div></div></div>
+    ${engagementHtml(a)}
     <h2 class="sec">Bài trợ lý soạn</h2>${draftsHtml}
     <h2 class="sec">Kế hoạch tuần</h2>${plansHtml}`;
   bindPrompts(v, lib);
+  v.querySelector('#msave2')?.addEventListener('click', async () => {
+    try { await api('/api/assistant/models', { method: 'PUT', body: { write: v.querySelector('#mw').value, fast: v.querySelector('#mf').value } }); toast('Đã đổi model Claude'); viewAssistant(); } catch (e) { toast(e.message); }
+  });
+  v.querySelector('#engsug')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang phân tích…';
+    try { const r = await api('/api/assistant/run', { method: 'POST', body: { page_id: a.page.id, steps: ['suggest'] } }); toast(r.log?.slice(-1)[0] || 'Xong'); topicState.tab = 'de-xuat'; go('chu-de'); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Phân tích và đề xuất cân chỉnh chủ đề'; }
+  });
   const times = () => [v.querySelector('#at1').value, v.querySelector('#at2').value].filter(Boolean);
   v.querySelector('#asave')?.addEventListener('click', async () => {
     try { await api('/api/assistant/settings', { method: 'PUT', body: { page_id: a.page.id, on: v.querySelector('#aon').checked, per_day: Number(v.querySelector('#aper').value), times: times(), website: v.querySelector('#aweb').checked } }); toast('Đã lưu cài đặt'); } catch (e) { toast(e.message); }
@@ -2022,6 +2076,110 @@ async function viewAssistant() {
   v.querySelectorAll('[data-cedit]').forEach((b) => (b.onclick = () => { Object.assign(calState, { status: '', page: a.page.id, view: 'list', focus: Number(b.dataset.cedit) }); go('lich-dang'); }));
 }
 
+// ---------- Kho ảnh, video theo Fanpage ----------
+const mediaState = { kind: '', topic: '', source: '', q: '' };
+const fmtSize = (b) => (b >= 1048576 ? `${(b / 1048576).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+const MSRC = { upload: 'Tải lên', ai: 'AI tạo' };
+const mediaThumb = (x) => (x.kind === 'video' ? `<video src="${esc(x.url)}" muted preload="metadata"></video><span class="tag">Video</span>` : `<img src="${esc(x.url)}" alt="${esc(x.name || '')}" loading="lazy">`);
+async function subTopicsOf(pageId) {
+  try { const d = await api(`/api/topics?page_id=${encodeURIComponent(pageId)}`); return d.topics.flatMap((t) => t.children.map((c) => ({ id: c.id, title: c.title, parent: t.title }))); } catch { return []; }
+}
+const topicOptions = (subs, sel) => `<option value="">Chưa gắn chủ đề</option>${subs.map((c) => `<option value="${c.id}" ${Number(sel) === c.id ? 'selected' : ''}>${esc(c.parent)} › ${esc(c.title)}</option>`).join('')}`;
+
+async function viewMedia(q) {
+  layout('kho-media', 'Kho ảnh, video', 'Ảnh, video của từng Fanpage: tải lên hoặc do AI tạo, gắn chủ đề để dùng lại khi đăng bài', '<div class="muted">Đang tải…</div>');
+  const pick = await topicPagePick();
+  document.querySelector('.top .row').innerHTML = pick.sel;
+  pick.bind();
+  const v = document.getElementById('view');
+  if (!topicState.page) { v.innerHTML = '<div class="card">Chưa có Fanpage nào.</div>'; return; }
+  if (q?.get('topic')) mediaState.topic = q.get('topic');
+  const qs = new URLSearchParams({ page_id: topicState.page });
+  if (mediaState.kind) qs.set('kind', mediaState.kind);
+  if (mediaState.topic) qs.set('topic_id', mediaState.topic);
+  if (mediaState.source) qs.set('source', mediaState.source);
+  if (mediaState.q) qs.set('q', mediaState.q);
+  const [d, subs] = await Promise.all([api(`/api/media?${qs}`), subTopicsOf(topicState.page)]);
+  if (!d.enabled) { v.innerHTML = '<div class="card">Chưa bật kho lưu ảnh, video (Cloudflare R2). Vui lòng liên hệ Chủ hệ thống.</div>'; return; }
+  v.innerHTML = `<div class="card mup"><h2>Thêm vào kho</h2>
+      <div class="grid g3"><div><label for="mtopic">Chủ đề con</label><select id="mtopic">${topicOptions(subs, mediaState.topic)}</select></div>
+      <div><label for="msrc">Nguồn</label><select id="msrc"><option value="upload">Tải lên (ảnh chụp, thiết kế)</option><option value="ai">AI tạo (ghi prompt bên cạnh)</option></select></div>
+      <div><label for="mnote">Ghi chú hoặc prompt đã dùng</label><input id="mnote" maxlength="1000" placeholder="Ví dụ: prompt fb-03, ảnh tem QR trên trái sầu riêng"></div></div>
+      <div class="row"><label class="btn upl">Chọn ảnh, video<input id="mfiles" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/quicktime" multiple hidden></label>
+      <span class="muted small">Ảnh tối đa 10 MB, video MP4 tối đa 95 MB. Kho đang có ${fmtNum(d.total.n)} file, ${fmtSize(d.total.bytes || 0)}.</span></div><div id="mupmsg"></div></div>
+    <div class="row mfilter"><select id="fk" class="sm" aria-label="Loại"><option value="">Ảnh và video</option><option value="image" ${mediaState.kind === 'image' ? 'selected' : ''}>Ảnh</option><option value="video" ${mediaState.kind === 'video' ? 'selected' : ''}>Video</option></select>
+      <select id="ft" class="sm" aria-label="Chủ đề"><option value="">Mọi chủ đề</option>${subs.map((c) => `<option value="${c.id}" ${Number(mediaState.topic) === c.id ? 'selected' : ''}>${esc(c.title)}</option>`).join('')}</select>
+      <select id="fs" class="sm" aria-label="Nguồn"><option value="">Mọi nguồn</option><option value="upload" ${mediaState.source === 'upload' ? 'selected' : ''}>Tải lên</option><option value="ai" ${mediaState.source === 'ai' ? 'selected' : ''}>AI tạo</option></select>
+      <input id="fq" class="sm" placeholder="Tìm theo tên, ghi chú" value="${esc(mediaState.q)}"></div>
+    ${d.items.length ? `<div class="mgrid">${d.items.map((x) => `<button type="button" class="mcard" data-mid="${x.id}"><div class="mth">${mediaThumb(x)}</div>
+      <div class="small mname">${esc(x.name || 'Không tên')}</div><div class="muted small">${esc(x.topic_title || 'Chưa gắn chủ đề')}</div>
+      <div class="row small"><span class="badge ${x.source === 'ai' ? 'warn' : 'off'}">${MSRC[x.source] || x.source}</span>${x.used.length ? `<span class="badge ok">Dùng ở ${x.used.length} bài</span>` : ''}</div></button>`).join('')}</div>`
+      : '<div class="card muted">Chưa có ảnh, video nào trong kho của Trang này.</div>'}`;
+  const reload = () => viewMedia();
+  v.querySelector('#fk').onchange = (e) => { mediaState.kind = e.target.value; reload(); };
+  v.querySelector('#ft').onchange = (e) => { mediaState.topic = e.target.value; reload(); };
+  v.querySelector('#fs').onchange = (e) => { mediaState.source = e.target.value; reload(); };
+  v.querySelector('#fq').onchange = (e) => { mediaState.q = e.target.value.trim(); reload(); };
+  v.querySelector('#mfiles').onchange = async (e) => {
+    const files = [...e.target.files]; e.target.value = '';
+    const msg = v.querySelector('#mupmsg');
+    const opt = { page_id: topicState.page, topic_id: v.querySelector('#mtopic').value, source: v.querySelector('#msrc').value, note: v.querySelector('#mnote').value.trim() };
+    for (const [i, file] of files.entries()) {
+      msg.innerHTML = `<div class="muted small">Đang tải ${i + 1}/${files.length}: ${esc(file.name)}…</div>`;
+      try { await uploadFile(file, opt); } catch (err) { msg.innerHTML = `<div class="alert err small">${esc(file.name)}: ${esc(err.message)}</div>`; return; }
+    }
+    toast(`Đã thêm ${files.length} file vào kho`); reload();
+  };
+  const byId = Object.fromEntries(d.items.map((x) => [x.id, x]));
+  v.querySelectorAll('[data-mid]').forEach((b) => (b.onclick = () => openMediaItem(byId[b.dataset.mid], subs, d.can_delete, reload)));
+}
+
+function openMediaItem(x, subs, canDelete, done) {
+  const full = `${location.origin}${x.url}`;
+  modal(`<h2>${esc(x.name || 'Ảnh, video')}</h2>
+    <div class="mprev">${x.kind === 'video' ? `<video src="${esc(x.url)}" controls preload="metadata"></video>` : `<img src="${esc(x.url)}" alt="">`}</div>
+    <div class="muted small">${MSRC[x.source] || ''} · ${fmtSize(x.size)} · ${fmtTime(x.created_at)}${x.created_by_name ? ` · ${esc(x.created_by_name)}` : ''}</div>
+    <label for="mn">Tên</label><input id="mn" maxlength="200" value="${esc(x.name || '')}">
+    <label for="mt">Chủ đề con</label><select id="mt">${topicOptions(subs, x.topic_id)}</select>
+    <label for="mo">Ghi chú hoặc prompt đã dùng</label><textarea id="mo" rows="3" maxlength="1000">${esc(x.note || '')}</textarea>
+    ${x.used.length ? `<div class="tf"><div class="muted small">Đang dùng trong bài</div>${x.used.map((u) => `<div class="small">• ${esc((CSTATUS[u.status] || [u.status])[0])}: ${esc(u.line)}</div>`).join('')}</div>` : ''}
+    <div class="row"><button type="button" class="btn ghost sm" id="mcopy">Sao chép đường dẫn</button><button type="button" class="btn ghost sm" id="mpost">Tạo bài với file này</button></div>
+    <div id="mmsg2"></div>
+    <div class="actions">${canDelete ? `<button class="btn ghost danger" id="mdel" ${x.used.length ? 'disabled title="File đang dùng trong bài"' : ''}>Xóa khỏi kho</button>` : ''}<button class="btn ghost" data-close>Đóng</button><button class="btn" id="msave">Lưu</button></div>`,
+  (m, close) => {
+    m.querySelector('[data-close]').onclick = close;
+    m.querySelector('#mcopy').onclick = async () => { try { await navigator.clipboard.writeText(full); toast('Đã sao chép đường dẫn'); } catch { m.querySelector('#mmsg2').innerHTML = `<div class="small">${esc(full)}</div>`; } };
+    m.querySelector('#mpost').onclick = async () => {
+      close();
+      const { pages } = await api('/api/pages');
+      openContentForm(pages.filter((p) => p.id === x.page_id), null, { can_create: true, can_approve: isMgr(), media_enabled: true }, { media: [x] });
+    };
+    m.querySelector('#msave').onclick = async () => {
+      try { await api(`/api/media/${x.id}`, { method: 'PATCH', body: { name: m.querySelector('#mn').value.trim(), topic_id: m.querySelector('#mt').value || null, note: m.querySelector('#mo').value.trim() } }); toast('Đã lưu'); close(); done(); }
+      catch (e) { m.querySelector('#mmsg2').innerHTML = `<div class="alert err small">${esc(e.message)}</div>`; }
+    };
+    m.querySelector('#mdel')?.addEventListener('click', async () => {
+      close();
+      if (!(await confirmBox('Xóa file khỏi kho?', `File "${x.name || ''}" sẽ bị xóa vĩnh viễn, không khôi phục được.`, 'Xóa', true))) return;
+      try { await api(`/api/media/${x.id}`, { method: 'DELETE' }); toast('Đã xóa'); done(); } catch (e) { toast(e.message); }
+    });
+  });
+}
+
+// Chọn ảnh, video có sẵn trong kho của Trang để gắn vào bài.
+async function pickMedia(pageId, onPick) {
+  const d = await api(`/api/media?page_id=${encodeURIComponent(pageId)}`);
+  const chosen = new Set();
+  modal(`<h2>Chọn từ kho ảnh, video</h2>
+    ${d.items.length ? `<div class="mgrid sm">${d.items.map((x) => `<button type="button" class="mcard" data-pk="${x.id}"><div class="mth">${mediaThumb(x)}</div><div class="small mname">${esc(x.name || '')}</div><div class="muted small">${esc(x.topic_title || '')}</div></button>`).join('')}</div>` : '<div class="muted">Kho của Trang này chưa có file nào. Mở mục Kho ảnh, video để thêm.</div>'}
+    <div class="actions"><button class="btn ghost" data-close>Hủy</button><button class="btn" id="pkok">Gắn vào bài</button></div>`,
+  (m, close) => {
+    m.querySelector('[data-close]').onclick = close;
+    m.querySelectorAll('[data-pk]').forEach((b) => (b.onclick = () => { const id = Number(b.dataset.pk); if (chosen.has(id)) chosen.delete(id); else chosen.add(id); b.classList.toggle('on', chosen.has(id)); }));
+    m.querySelector('#pkok').onclick = () => { onPick(d.items.filter((x) => chosen.has(x.id))); close(); };
+  });
+}
+
 async function render() {
   const { path, q } = parseHash();
   if (!me) {
@@ -2038,6 +2196,7 @@ async function render() {
       case 'nguon-noi-dung': return await viewSources();
       case 'chu-de': return me.role !== 'agent' ? await viewTopics(q) : go('tong-quan');
       case 'tro-ly': return me.role !== 'agent' ? await viewAssistant() : go('tong-quan');
+      case 'kho-media': return me.role !== 'agent' ? await viewMedia(q) : go('tong-quan');
       case 'quang-cao': return me.role === 'owner' || me.role === 'manager' ? await viewAds(q) : go('tong-quan');
       case 'lich-dang': return await viewCalendar(q);
       case 'quy-dinh': return await viewRules();

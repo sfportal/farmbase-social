@@ -398,3 +398,27 @@ details.pfb textarea { margin: 6px 0; }
 .aiwhy { margin: 4px 0; color: var(--forest); }
 @media (prefers-color-scheme: dark) { .aiwhy { color: var(--leaf); } }
 @media (max-width: 899px) { .adraft .adgrid { grid-template-columns: 1fr; } }
+
+/* Kho ảnh, video */
+.grid.g3 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.grid.g2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.mup .row { margin-top: 10px; gap: 10px; align-items: center; }
+.mfilter { gap: 8px; margin: 16px 0 10px; flex-wrap: wrap; }
+.mfilter input { width: auto; min-width: 180px; }
+.mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.mgrid.sm { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); max-height: 55vh; overflow: auto; padding: 4px; }
+.mcard { text-align: left; background: var(--surface); border: 1px solid var(--line, #e5e7eb); border-radius: 12px; padding: 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; font: inherit; color: inherit; min-width: 0; }
+.mcard:hover { border-color: var(--leaf); }
+.mcard.on { outline: 3px solid var(--leaf); }
+.mcard .row { gap: 4px; flex-wrap: wrap; }
+.mth { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--sprout); }
+.mth img, .mth video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mth .tag { position: absolute; left: 4px; bottom: 4px; font-size: 11px; background: rgba(0,0,0,.65); color: #fff; padding: 1px 6px; border-radius: 6px; }
+.mname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mprev img, .mprev video { width: 100%; max-height: 50vh; object-fit: contain; border-radius: 10px; background: #000; margin: 8px 0; }
+.eng .stat { display: flex; flex-direction: column; gap: 2px; background: var(--sprout); border-radius: 10px; padding: 10px 12px; }
+.eng .stat .n { font-size: 22px; }
+.eng h3 { margin: 14px 0 6px; font-size: 15px; }
+.eng .row { margin-top: 10px; }
+.mfilter select, .mup select { max-width: 100%; min-width: 0; }
+.eng { margin-top: 16px; } .eng .grid.g3 { margin-top: 12px; }
