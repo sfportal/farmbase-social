@@ -762,6 +762,21 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   // Trợ lý: chạy ngay → kế hoạch tuần, bài cho ngày mai ở trạng thái chờ duyệt, có lý do và kết quả tự kiểm tra
   r = await viewer.req('/api/assistant/run', { method: 'POST', body: { page_id: '222' } });
   assert.equal(r.status, 403, 'biên tập không chạy trợ lý');
+  // Thiết lập AI chỉ Chủ hệ thống sửa; Quản lý vẫn xem và chạy được
+  const mgr = new Client();
+  r = await owner.req('/api/users', { method: 'POST', body: { email: 'quanly-ai@example.test', role: 'manager', page_ids: ['111'] } });
+  const mgPw = r.data.temp_password;
+  await mgr.req('/api/auth/login', { method: 'POST', body: { email: 'quanly-ai@example.test', password: mgPw } });
+  await mgr.req('/api/auth/change-password', { method: 'POST', body: { current_password: mgPw, new_password: 'QuanLy-AI-2026' } });
+  r = await mgr.req('/api/assistant/settings', { method: 'PUT', body: { page_id: '111', on: false } });
+  assert.equal(r.status, 403, 'quản lý không sửa thiết lập AI');
+  r = await mgr.req('/api/assistant/models', { method: 'PUT', body: { write: 'claude-sonnet-5-5', fast: 'claude-haiku-5-5' } });
+  assert.equal(r.status, 403, 'quản lý không đổi model');
+  r = await mgr.req('/api/assistant/prompts/suggest', { method: 'POST' });
+  assert.equal(r.status, 403, 'quản lý không thêm prompt');
+  r = await mgr.req('/api/assistant?page_id=111');
+  assert.equal(r.status, 200);
+  assert.equal(r.data.can_settings, false); assert.equal(r.data.can_run, true);
   r = await owner.req('/api/assistant/settings', { method: 'PUT', body: { page_id: '111', on: true, per_day: 1, times: ['19:30'], website: true } });
   assert.equal(r.status, 200);
   // Tin báo trong kho kiến thức để trợ lý soạn bài chia sẻ
@@ -988,6 +1003,17 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.waitForSelector('#armsg');
   await page.screenshot({ path: `test-output/${label}-tu-tra-loi.png` });
   await page.keyboard.press('Escape');
+  await page.click('[data-staff="111"]');
+  await page.waitForSelector('[data-uid]');
+  await page.screenshot({ path: `test-output/${label}-giao-nhan-vien.png` });
+  await page.keyboard.press('Escape');
+  // Chuyển trang nhanh: trang đang tải dở không được ghi đè hay báo lỗi lên trang mới
+  for (const from of ['bao-cao', 'tro-ly', 'chu-de', 'kho-media']) {
+    await page.evaluate((f) => { location.hash = '#/' + f; setTimeout(() => (location.hash = '#/fanpage'), 60); }, from);
+    await page.waitForTimeout(2500);
+    assert.equal(await page.locator('#view .alert.err').count(), 0, `${label}: ${from} → fanpage không báo lỗi`);
+    assert.ok(await page.locator('#view [data-auto]').count() > 0, `${label}: ${from} → fanpage hiện đúng nội dung`);
+  }
   await page.goto(`${BASE}/#/quang-cao?cd=7001`);
   await page.waitForSelector('.bars');
   await page.waitForTimeout(400);

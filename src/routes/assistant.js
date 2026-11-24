@@ -612,6 +612,7 @@ export async function assistantState(request, env, user) {
     models: aiProvider(env) === 'claude' ? await claudeModels(env) : null,
     model_choices: MODEL_CHOICES.map((m) => ({ ...m, price: PRICES[m.id], per_post: Math.round(costPerPost(m.id, 'claude-haiku-5-5') * 10000) / 10000 })),
     can_models: user.role === 'owner',
+    can_settings: user.role === 'owner',
     pending_suggestions: pending.n,
     can_run: user.role === 'owner' || user.role === 'manager',
   });
@@ -619,7 +620,7 @@ export async function assistantState(request, env, user) {
 
 // PUT /api/assistant/settings { page_id, on, per_day, times, website }
 export async function saveAssistantSettings(request, env, user) {
-  requireRole(user, 'owner', 'manager');
+  requireRole(user, 'owner'); // thiết lập AI: chỉ Chủ hệ thống
   const b = await readJson(request);
   const pid = String(b.page_id || '');
   if (!(await allowedPageIds(env, user)).includes(pid)) throw new HttpError(404, 'Không tìm thấy Fanpage', 'not_found');
@@ -746,7 +747,7 @@ export async function saveModels(request, env, user) {
 
 // POST /api/assistant/prompts/suggest: đề xuất prompt mới ngay
 export async function suggestPromptsNow(request, env, user) {
-  requireRole(user, 'owner', 'manager');
+  requireRole(user, 'owner');
   if (!aiProvider(env)) throw new HttpError(503, 'Chưa cài AI cho hệ thống', 'no_ai');
   const log = await suggestPrompts(env, []);
   return json({ log });
@@ -754,7 +755,7 @@ export async function suggestPromptsNow(request, env, user) {
 
 // POST /api/assistant/prompts/:sid/accept | dismiss: duyệt prompt đề xuất (chấp nhận thì thêm vào Prompt bổ sung, mã bs-NN)
 async function decidePrompt(request, env, user, sid, accept) {
-  requireRole(user, 'owner', 'manager');
+  requireRole(user, 'owner');
   const all = await getSetting(env, 'prompt_suggestions', []);
   const x = all.find((p) => p.sid === String(sid));
   if (!x || x.status !== 'pending') throw new HttpError(404, 'Không tìm thấy đề xuất', 'not_found');
