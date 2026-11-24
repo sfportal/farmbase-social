@@ -19,7 +19,10 @@ Chạy trên Cloudflare Workers + D1 (gói miễn phí; dùng chung D1 `farmbase
 | Thêm | Quảng cáo: xem tài khoản quảng cáo, chiến dịch, ngân sách, chi tiêu, tin nhắn, chi phí mỗi kết quả theo khoảng thời gian (chỉ đọc, quyền `ads_read`) | Xong |
 | Thêm | Quảng cáo: tạm dừng, bật lại chiến dịch, đổi ngân sách | Chưa làm |
 | Thêm | Báo cáo hiệu quả Fanpage theo ngày, tuần (7, 15, 30, 90 ngày) | Xong |
-| 4 | CRM mini, ghi đơn, kho kiến thức AI, báo cáo tuần | Chưa làm |
+| Thêm | Chủ đề nội dung theo Fanpage (chủ đề, chủ đề con, hook, thông điệp, CTA, dữ kiện, hình/video, prompt, storyboard, gợi ý ads), bộ mẫu Chiến dịch 10.000 ha và FarmBase | Xong |
+| Thêm | Kho kiến thức (tài liệu, tin tức tự đọc, góp ý), đề xuất cập nhật chủ đề | Xong |
+| Thêm | Trợ lý AI 7h00 mỗi sáng: kế hoạch tuần, 1–2 bài cho ngày mai chờ duyệt, tự kiểm tra, lý do, gợi ý website, góp ý để viết lại | Xong |
+| 4 | CRM mini, ghi đơn, báo cáo tuần | Chưa làm |
 
 ## API
 
@@ -53,6 +56,17 @@ Hẹn giờ dùng `scheduled_publish_time` của Facebook (10 phút đến 30 ng
 | POST | `/api/ai/write` `{ brief, current?, length?, page_ids? }`: AI viết bài theo quy định (Claude nếu có `ANTHROPIC_API_KEY`, DeepSeek nếu có `DEEPSEEK_API_KEY`, nếu không dùng Workers AI `AI`) | Mọi vai trò trừ Chăm sóc khách hàng |
 | GET, POST | `/api/sources` `{ kind: website, url }` hoặc `{ kind: fanpage, page_id }`: nguồn nội dung (website tự tìm RSS, Atom, WordPress; Fanpage chỉ là Trang đã kết nối) | Mọi vai trò trừ Chăm sóc khách hàng |
 | GET | `/api/sources/:id/items`: bài viết (website), bài đăng và video (Fanpage) | Như trên |
+| GET, POST | `/api/topics?page_id=`: cây chủ đề (Trang chưa có chủ đề, tên khớp bộ mẫu thì tự nạp mẫu); thêm chủ đề `{ page_id, parent_id?, ... }` | Xem: trừ Chăm sóc khách hàng · Sửa: Chủ hệ thống, Quản lý, Biên tập |
+| PATCH, DELETE | `/api/topics/:id` | Sửa: như trên · Xóa: Chủ hệ thống, Quản lý |
+| POST | `/api/topics/seed` `{ page_id, template: 10000ha \| farmbase }` | Chủ hệ thống, Quản lý |
+| PUT | `/api/topics/brief` `{ page_id, brief }`: hồ sơ Fanpage cho AI | Chủ hệ thống, Quản lý, Biên tập |
+| GET | `/api/topics/suggestions?page_id=`; POST `/api/topics/suggestions/:id/accept`, `/dismiss` | Như trên |
+| GET, POST | `/api/knowledge`: kho kiến thức (AI tóm tắt tài liệu bằng Claude Haiku); PATCH, DELETE `/api/knowledge/:id` | Như trên; xóa: Chủ hệ thống, Quản lý |
+| GET | `/api/assistant?page_id=`: cài đặt, kế hoạch tuần, bài trợ lý soạn, chi phí AI tháng | Trừ Chăm sóc khách hàng |
+| PUT | `/api/assistant/settings`; POST `/api/assistant/run` `{ page_id, steps }`, `/api/assistant/plan-feedback` | Chủ hệ thống, Quản lý |
+| POST | `/api/assistant/revise/:id` `{ feedback }`: viết lại theo góp ý, lưu góp ý cho các bài sau | Trừ Chăm sóc khách hàng |
+
+Trợ lý chạy bằng Cron Trigger `0 0 * * *` (7h00 giờ Việt Nam): đọc tin từ nguồn, lập kế hoạch tuần nếu chưa có, soạn bài cho ngày mai ở trạng thái Chờ duyệt (không tự đăng), thứ Hai đề xuất cập nhật chủ đề. Chi phí Claude: `claude-haiku-5-5` cho tóm tắt, tự kiểm tra, đề xuất; `claude-sonnet-5-5` cho viết bài, kế hoạch (đổi bằng `CLAUDE_FAST_MODEL`, `CLAUDE_MODEL`); phần hướng dẫn cố định được cache; số token cộng dồn theo tháng trong `social_settings` khóa `ai_usage:YYYY-MM`.
 | POST | `/api/sources/write` `{ url, title, summary, mode: share\|rewrite, length, page_ids }`: AI viết lời chia sẻ kèm liên kết, hoặc viết lại bài có dòng "Nguồn:" | Như trên |
 | DELETE | `/api/sources/:id`: bỏ nguồn khỏi danh sách | Như trên |
 | GET, POST | `/api/fb/webhook`: Facebook xác minh (verify token suy ra từ `TOKEN_KEY`) và gửi tin nhắn, bình luận mới (kiểm tra chữ ký bằng `FB_APP_SECRET`) | Công khai |

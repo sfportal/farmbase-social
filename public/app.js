@@ -101,6 +101,8 @@ const I = {
   lib: '<path d="M4 4h5v16H4zM10 4h4v16h-4z"/><path d="m15.5 5 3.8-1 2.2 15.6-3.8 1z"/>',
   rule: '<path d="M5 3h11l3 3v15H5z"/><path d="m8.5 12 2 2 4-4M8.5 17h7"/>',
   src: '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/><path d="m15 15 2 2 3-3"/>',
+  topic: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="12" r="2.5"/><circle cx="6" cy="18" r="2.5"/><path d="M8.5 6H12v12H8.5M12 12h3.5"/>',
+  bot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 13h.01M15 13h.01M9.5 17h5"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
 
@@ -110,7 +112,7 @@ function navItems() {
     { r: 'tong-quan', label: 'Tổng quan', ic: 'home' },
     { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox' },
     { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal' },
-    ...(me.role !== 'agent' ? [{ r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src' }] : []),
+    ...(me.role !== 'agent' ? [{ r: 'tro-ly', label: 'Trợ lý AI', ic: 'bot' }, { r: 'chu-de', label: 'Chủ đề nội dung', ic: 'topic' }, { r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src' }] : []),
     { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule' },
     { r: 'fanpage', label: 'Fanpage', ic: 'pages' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'chart' },
@@ -486,7 +488,7 @@ const CSTATUS = {
   draft: ['Nháp', 'off'], pending: ['Chờ duyệt', 'warn'], rejected: ['Bị từ chối', 'err'],
   scheduled: ['Đã hẹn giờ', ''], published: ['Đã đăng', 'ok'], failed: ['Đăng lỗi', 'err'],
 };
-const calState = { status: '', page: '', view: 'list', month: '' };
+const calState = { status: '', page: '', view: 'list', month: '', focus: null };
 const toLocalInput = (t) => { if (!t) return ''; const d = new Date(t * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 const dayKey = (t) => new Date(t * 1000).toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' });
 
@@ -526,9 +528,9 @@ function contentForm(pages, item, perms, pre) {
   return `<h2>${editing ? 'Sửa bài' : 'Soạn bài mới'}</h2>
     <form id="cf" novalidate>
       <label>Fanpage</label>${pagePick}
-      <details class="ai" id="aibox"><summary>✨ Viết bằng AI theo quy định đăng bài</summary>
+      <details class="ai" id="aibox" ${pre?.brief ? 'open' : ''}><summary>✨ Viết bằng AI theo quy định đăng bài</summary>
         <label for="brief">Ý chính cần viết</label>
-        <textarea id="brief" rows="3" maxlength="2000" placeholder="Ví dụ: Mời bà con dự hội thảo kỹ thuật chăm sóc sầu riêng sau thu hoạch, sáng 25/11 tại HTX..."></textarea>
+        <textarea id="brief" rows="3" maxlength="2000" placeholder="Ví dụ: Mời bà con dự hội thảo kỹ thuật chăm sóc sầu riêng sau thu hoạch, sáng 25/11 tại HTX...">${esc(pre?.brief || '')}</textarea>
         <div class="row ai-row"><select id="alen" aria-label="Độ dài"><option value="ngan">Ngắn</option><option value="vua" selected>Vừa</option><option value="dai">Dài</option></select>
           <button type="button" class="btn sm" id="aigo">Viết bài</button><button type="button" class="btn ghost sm" id="airew">Viết lại nội dung bên dưới</button>
           <a class="small" href="#/quy-dinh" target="_blank" rel="noopener">Xem quy định</a></div>
@@ -747,7 +749,8 @@ function contentCard(c, perms) {
       ${c.link ? `<div class="small ellipsis"><a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.link)}</a></div>` : ''}
       ${c.reject_reason ? `<div class="alert warn small">Lý do từ chối: ${esc(c.reject_reason)}</div>` : ''}
       ${c.status === 'failed' && c.last_error ? `<div class="alert err small">Facebook báo lỗi: ${esc(c.last_error)}</div>` : ''}
-      <div class="muted small">Soạn: ${esc(c.created_by_name || '–')}${c.approved_by_name ? ` · Duyệt: ${esc(c.approved_by_name)}` : ''}</div>
+      ${c.ai?.reason ? `<div class="small aiwhy">🤖 ${esc(c.ai.topic_title ? `${c.ai.topic_title}: ` : '')}${esc(c.ai.reason)}${c.ai.check && !c.ai.check.ok ? ' <span class="badge warn">Cần xem lại</span>' : ''}</div>` : ''}
+      <div class="muted small">Soạn: ${esc(c.created_by_name || (c.ai ? 'Trợ lý AI' : '–'))}${c.approved_by_name ? ` · Duyệt: ${esc(c.approved_by_name)}` : ''}</div>
       ${acts.length ? `<div class="row" style="margin-top:8px">${acts.join('')}</div>` : ''}
     </div></article>`;
 }
@@ -836,6 +839,7 @@ async function loadCalendar() {
   box.querySelectorAll('[data-c-edit]').forEach((b) => (b.onclick = () => openContentForm(calPages, byId[b.dataset.cEdit], perms)));
   box.querySelectorAll('[data-c-submit]').forEach((b) => (b.onclick = () => act(b, () => api(`/api/content/${b.dataset.cSubmit}/submit`, { method: 'POST' }), 'Đã gửi duyệt')));
   box.querySelectorAll('[data-c-approve]').forEach((b) => (b.onclick = () => openApprove(byId[b.dataset.cApprove])));
+  if (calState.focus) { const el = document.getElementById(`c-${calState.focus}`); calState.focus = null; if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 2000); } }
   box.querySelectorAll('[data-c-reject]').forEach((b) => (b.onclick = () => {
     modal(`<h2>Từ chối bài</h2><label for="why">Lý do (người soạn sẽ thấy)</label><textarea id="why" rows="3" maxlength="500"></textarea>
       <div class="actions"><button class="btn ghost" data-no>Hủy</button><button class="btn danger" data-yes>Từ chối</button></div>`, (m, close) => {
@@ -1608,6 +1612,9 @@ const ACTIONS = {
   post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
   media_uploaded: 'Tải ảnh/video lên', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
+  topics_seeded: 'Nạp bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
+  knowledge_added: 'Nạp tài liệu', knowledge_updated: 'Sửa tóm tắt kiến thức', knowledge_deleted: 'Xóa kiến thức', suggestion_accepted: 'Chấp nhận đề xuất chủ đề', suggestion_dismissed: 'Bỏ qua đề xuất chủ đề',
+  assistant_run: 'Trợ lý AI chạy', assistant_settings: 'Cài đặt trợ lý AI', plan_regenerated: 'Lập lại kế hoạch tuần', ai_revised: 'AI viết lại theo góp ý',
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',
 };
 
@@ -1641,6 +1648,380 @@ function viewAccount() {
 }
 
 // ---------- Định tuyến ----------
+// ---------- Chủ đề nội dung: chủ đề → chủ đề con → bài viết, hình ảnh, video, ads ----------
+const topicState = { page: localStorage.getItem('fbsTopicPage') || '', tab: 'chu-de' };
+const TOPIC_LABELS = { goal: 'Mục tiêu truyền thông', audience: 'Đối tượng', hook: 'Câu móc (hook), mỗi dòng một phương án', message: 'Thông điệp chính', cta: 'Lời kêu gọi hành động (CTA)', facts: 'Dữ kiện được phép dùng, mỗi dòng một ý', ideas: 'Ý bài viết, mỗi dòng một ý', formats: 'Định dạng', visual: 'Hình ảnh, video cần làm', prompt_ids: 'Mẫu prompt (Thư viện prompt)', storyboard_id: 'Storyboard mẫu', ads: 'Gợi ý chạy quảng cáo', keywords: 'Từ khóa đọc tin (cách nhau dấu phẩy)' };
+const canEditTopics = () => ['owner', 'manager', 'editor'].includes(me.role);
+const isMgr = () => me.role === 'owner' || me.role === 'manager';
+
+// Thư viện prompt (tải một lần từ /prompt/, dùng để hiện tên mẫu và nội dung prompt cạnh chủ đề).
+let promptLib = null;
+function loadPromptLib() {
+  if (promptLib) return promptLib;
+  const load = (src) => new Promise((res) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = res; document.head.appendChild(s); });
+  promptLib = Promise.all([window.PROMPTS ? null : load('/prompt/data.js'), window.SB_MAU ? null : load('/prompt/storyboard-mau.js')]).then(() => ({
+    prompts: Object.fromEntries((window.PROMPTS || []).map((p) => [p.id, p])),
+    list: window.PROMPTS || [],
+    sbs: Object.fromEntries((window.SB_MAU || []).map((s) => [s.id, s])),
+  }));
+  return promptLib;
+}
+const promptChip = (lib, id) => { const p = lib?.prompts[id]; return `<button type="button" class="chip pchip" data-prompt="${esc(id)}" title="${esc(p?.name || id)}">${esc(id)}${p ? ` · ${esc(p.name.slice(0, 42))}` : ''}</button>`; };
+
+function openPrompt(lib, id) {
+  const p = lib.prompts[id];
+  if (!p) { toast('Không tìm thấy mẫu prompt này'); return; }
+  modal(`<h2>${esc(p.id)} · ${esc(p.name)}</h2>
+    <div class="muted small">${esc(p.groupName)} · ${esc({ video: 'Video', image: 'Hình ảnh', doc: 'Tài liệu' }[p.kind] || p.kind)} · Công cụ: ${esc(p.tool || '')}</div>
+    ${p.dungcho ? `<p class="small">Dùng cho: ${esc(p.dungcho)}</p>` : ''}
+    <div class="secret pre">${esc(p.text)}</div>
+    <div class="actions"><a class="btn ghost" href="/prompt/" target="_blank" rel="noopener">Mở Thư viện prompt</a><button class="btn ghost" data-copy>Sao chép prompt</button><button class="btn" data-close>Đóng</button></div>`,
+  (m, close) => {
+    m.querySelector('[data-close]').onclick = close;
+    m.querySelector('[data-copy]').onclick = async () => { try { await navigator.clipboard.writeText(p.text); toast('Đã sao chép prompt'); } catch { toast('Không sao chép được, vui lòng chép tay'); } };
+  });
+}
+function bindPrompts(root, lib) { root.querySelectorAll('[data-prompt]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openPrompt(lib, b.dataset.prompt); })); }
+
+function storyboardHtml(lib, id) {
+  const s = lib?.sbs[id];
+  if (!s) return '';
+  return `<details class="sb"><summary>Storyboard mẫu: ${esc(s.ten)} (${esc(s.kho || '')}, ${s.dur} giây)</summary>
+    <table class="sbt"><thead><tr><th>Cảnh</th><th>Hình ảnh</th><th>Chữ trên màn hình</th><th>Lời đọc</th></tr></thead><tbody>
+    ${(s.scenes || []).map((c, i) => `<tr><td>${i + 1}${c[1] ? ` <button type="button" class="link" data-prompt="${esc(c[1])}">${esc(c[1])}</button>` : ''}</td><td>${esc(c[2] || '')}</td><td>${esc(c[3] || '')}</td><td>${esc(c[4] || '')}</td></tr>`).join('')}
+    </tbody></table></details>`;
+}
+
+async function topicPagePick(active) {
+  const { pages } = await api('/api/pages');
+  const usable = pages.filter((p) => p.status !== 'disconnected');
+  if (!usable.some((p) => p.id === topicState.page)) topicState.page = usable[0]?.id || '';
+  const sel = usable.length > 1 ? `<select id="tpage" class="sm" aria-label="Fanpage">${usable.map((p) => `<option value="${esc(p.id)}" ${p.id === topicState.page ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : '';
+  return { usable, sel, bind: () => { const s = document.getElementById('tpage'); if (s) s.onchange = () => { topicState.page = s.value; try { localStorage.setItem('fbsTopicPage', s.value); } catch {} render(); }; } };
+}
+
+async function viewTopics(q) {
+  if (q?.get('tab')) topicState.tab = q.get('tab');
+  layout('chu-de', 'Chủ đề nội dung', 'Chủ đề, chủ đề con, kho kiến thức: nền để AI soạn bài, chọn hình ảnh, video và chạy quảng cáo', '<div class="muted">Đang tải…</div>');
+  const pick = await topicPagePick();
+  const v = document.getElementById('view');
+  document.querySelector('.top .row').innerHTML = pick.sel;
+  pick.bind();
+  if (!topicState.page) { v.innerHTML = '<div class="card">Chưa có Fanpage nào. Vui lòng kết nối Fanpage trước.</div>'; return; }
+  const [d, lib] = await Promise.all([api(`/api/topics?page_id=${encodeURIComponent(topicState.page)}`), loadPromptLib()]);
+  if (d.seeded) toast(`Đã nạp bộ chủ đề mẫu "${d.templates.find((t) => t.key === d.seeded)?.name}" cho Trang này`);
+  const tabs = [['chu-de', 'Chủ đề'], ['kien-thuc', 'Kho kiến thức'], ['de-xuat', `Đề xuất cập nhật${d.pending_suggestions ? ` (${d.pending_suggestions})` : ''}`], ['ho-so', 'Hồ sơ Fanpage']];
+  v.innerHTML = `<div class="seg tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" class="${topicState.tab === k ? 'on' : ''}" data-tab="${k}">${l}</button>`).join('')}</div><div id="tbody"></div>`;
+  v.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => { topicState.tab = b.dataset.tab; viewTopicsTab(d, lib); v.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('on', x === b)); }));
+  viewTopicsTab(d, lib);
+}
+
+function viewTopicsTab(d, lib) {
+  const box = document.getElementById('tbody');
+  if (topicState.tab === 'kien-thuc') return renderKnowledge(box, d);
+  if (topicState.tab === 'de-xuat') return renderSuggestions(box, d);
+  if (topicState.tab === 'ho-so') return renderBrief(box, d);
+  return renderTopicTree(box, d, lib);
+}
+
+function renderTopicTree(box, d, lib) {
+  const total = d.topics.reduce((a, t) => a + (t.share || 0), 0);
+  const tplPick = `<select id="tpl" class="sm">${d.templates.map((t) => `<option value="${t.key}" ${t.key === d.suggested_template ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`;
+  if (!d.topics.length) {
+    box.innerHTML = `<div class="card"><h2>Trang "${esc(d.page.name)}" chưa có chủ đề</h2>
+      <p class="muted">Quý khách nạp bộ chủ đề mẫu (đã có hook, thông điệp, CTA, dữ kiện, hình ảnh, prompt, gợi ý ads) rồi chỉnh lại, hoặc tự tạo chủ đề.</p>
+      <div class="row">${isMgr() ? `${tplPick}<button class="btn" id="seed">Nạp bộ mẫu</button>` : ''}${d.can_edit ? '<button class="btn ghost" id="addtop">Tạo chủ đề</button>' : ''}</div></div>`;
+  } else {
+    box.innerHTML = `<div class="card row between"><div class="muted small">${d.topics.length} chủ đề, ${d.topics.reduce((a, t) => a + t.children.length, 0)} chủ đề con · tổng tỷ trọng ${total}%${total !== 100 ? ' (nên bằng 100%)' : ''}. Trợ lý AI chỉ soạn bài theo chủ đề con đang bật.</div>
+      <div class="row">${d.can_edit ? '<button class="btn sm" id="addtop">Thêm chủ đề</button>' : ''}<a class="btn ghost sm" href="#/tro-ly">Trợ lý AI</a></div></div>
+      ${d.topics.map((t) => `<section class="card topic ${t.status === 'paused' ? 'paused' : ''}">
+        <div class="row between thead2"><div class="grow"><h2 style="margin:0">${esc(t.title)} ${t.share ? `<span class="badge">${t.share}%</span>` : ''} ${t.status === 'paused' ? '<span class="badge off">Tạm dừng</span>' : ''}</h2>
+          ${t.goal ? `<div class="muted small">${esc(t.goal)}</div>` : ''}${t.message ? `<div class="small">Thông điệp: ${esc(t.message)}</div>` : ''}</div>
+          ${d.can_edit ? `<div class="row"><button class="btn ghost sm" data-edit="${t.id}">Sửa</button><button class="btn sm" data-addsub="${t.id}">+ Chủ đề con</button></div>` : ''}</div>
+        <div class="subs">${t.children.map((c) => `<div class="sub ${c.status === 'paused' ? 'paused' : ''}" data-view-sub="${c.id}" tabindex="0">
+          <div class="row between"><b>${esc(c.title)}</b>${c.status === 'paused' ? '<span class="badge off">Tạm dừng</span>' : ''}</div>
+          ${c.hook ? `<div class="small hk">“${esc(c.hook.split('\n')[0])}”</div>` : ''}
+          ${c.cta ? `<div class="small muted">👉 ${esc(c.cta)}</div>` : ''}
+          <div class="chips">${c.formats ? `<span class="chip">${esc(c.formats)}</span>` : ''}${(c.prompt_ids || '').split(',').filter(Boolean).slice(0, 3).map((id) => promptChip(lib, id)).join('')}</div>
+        </div>`).join('') || '<div class="muted small">Chưa có chủ đề con.</div>'}</div></section>`).join('')}`;
+  }
+  const byId = {};
+  for (const t of d.topics) { byId[t.id] = t; for (const c of t.children) byId[c.id] = { ...c, parent: t }; }
+  box.querySelector('#seed')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { await api('/api/topics/seed', { method: 'POST', body: { page_id: d.page.id, template: box.querySelector('#tpl').value } }); toast('Đã nạp bộ chủ đề mẫu'); render(); } catch (err) { toast(err.message); e.target.disabled = false; }
+  });
+  box.querySelector('#addtop')?.addEventListener('click', () => openTopicForm(d, null, null, lib));
+  box.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => openTopicForm(d, byId[b.dataset.edit], null, lib)));
+  box.querySelectorAll('[data-addsub]').forEach((b) => (b.onclick = () => openTopicForm(d, null, byId[b.dataset.addsub], lib)));
+  box.querySelectorAll('[data-view-sub]').forEach((el) => {
+    const open = () => openSubTopic(d, byId[el.dataset.viewSub], lib);
+    el.onclick = open; el.onkeydown = (e) => { if (e.key === 'Enter') open(); };
+  });
+  bindPrompts(box, lib);
+}
+
+function openSubTopic(d, c, lib) {
+  const row = (k, pre = false) => (c[k] ? `<div class="tf"><div class="muted small">${TOPIC_LABELS[k]}</div><div class="${pre ? 'pre' : ''}">${esc(c[k])}</div></div>` : '');
+  modal(`<div class="muted small">${esc(c.parent.title)}</div><h2>${esc(c.title)}</h2>
+    <div class="tgrid">${row('goal')}${row('audience')}</div>${row('hook', true)}${row('message')}${row('cta')}${row('facts', true)}${row('ideas', true)}
+    <div class="tgrid">${row('formats')}${row('visual')}</div>
+    ${c.prompt_ids ? `<div class="tf"><div class="muted small">${TOPIC_LABELS.prompt_ids}</div><div class="chips">${c.prompt_ids.split(',').map((id) => promptChip(lib, id)).join('')}</div></div>` : ''}
+    ${storyboardHtml(lib, c.storyboard_id)}
+    ${row('ads', true)}${row('keywords')}
+    <div class="actions">${d.can_edit ? '<button class="btn ghost" data-edit>Sửa</button>' : ''}<button class="btn ghost" data-write>Soạn bài từ chủ đề này</button><button class="btn" data-close>Đóng</button></div>`,
+  (m, close) => {
+    m.querySelector('[data-close]').onclick = close;
+    m.querySelector('[data-edit]')?.addEventListener('click', () => { close(); openTopicForm(d, c, c.parent, lib); });
+    m.querySelector('[data-write]').onclick = () => {
+      close();
+      const brief = [`Chủ đề: ${c.title}`, c.hook ? `Hook: ${c.hook.split('\n')[0]}` : '', c.message ? `Thông điệp: ${c.message}` : '', c.cta ? `CTA: ${c.cta}` : '', c.facts ? `Dữ kiện: ${c.facts.replace(/\n/g, '; ')}` : ''].filter(Boolean).join('\n');
+      openContentForm([{ id: d.page.id, name: d.page.name }], null, { can_create: true, can_approve: isMgr(), media_enabled: true }, { brief });
+    };
+    bindPrompts(m, lib);
+  });
+}
+
+function openTopicForm(d, item, parent, lib) {
+  const isSub = item ? !!item.parent_id : !!parent;
+  const v = item || {};
+  const fields = isSub ? Object.keys(TOPIC_LABELS) : ['goal', 'audience', 'message'];
+  const ta = (k, rows = 2) => `<label for="tf-${k}">${TOPIC_LABELS[k]}</label><textarea id="tf-${k}" rows="${rows}">${esc(v[k] || '')}</textarea>`;
+  const inp = (k) => `<label for="tf-${k}">${TOPIC_LABELS[k]}</label><input id="tf-${k}" value="${esc(v[k] || '')}">`;
+  const sbs = Object.values(lib.sbs);
+  const body = fields.map((k) => {
+    if (k === 'prompt_ids') return `${inp(k)}<details class="ppick"><summary>Chọn từ Thư viện prompt</summary><input id="psearch" type="search" placeholder="Tìm mẫu: ảnh 4:5, Reels, sự kiện..."><div id="plist" class="plist"></div></details>`;
+    if (k === 'storyboard_id') return `<label for="tf-${k}">${TOPIC_LABELS[k]}</label><select id="tf-${k}"><option value="">(Không dùng)</option>${sbs.map((s) => `<option value="${esc(s.id)}" ${s.id === v[k] ? 'selected' : ''}>${esc(s.ten)}</option>`).join('')}</select>`;
+    if (['facts', 'ideas', 'hook', 'ads'].includes(k)) return ta(k, k === 'facts' ? 5 : 3);
+    if (['formats', 'keywords', 'audience', 'cta'].includes(k)) return inp(k);
+    return ta(k);
+  }).join('');
+  modal(`<h2>${item ? 'Sửa' : 'Thêm'} ${isSub ? 'chủ đề con' : 'chủ đề'}</h2>${parent && !item ? `<div class="muted small">Thuộc chủ đề: ${esc(parent.title)}</div>` : ''}
+    <form id="tf" novalidate><label for="tf-title">Tên ${isSub ? 'chủ đề con' : 'chủ đề'}</label><input id="tf-title" maxlength="160" value="${esc(v.title || '')}">
+      ${!isSub ? `<label for="tf-share">Tỷ trọng trong kế hoạch (%)</label><input id="tf-share" type="number" min="0" max="100" value="${v.share || 0}">` : ''}
+      ${body}
+      <label class="check"><input type="checkbox" id="tf-paused" ${v.status === 'paused' ? 'checked' : ''}> Tạm dừng (trợ lý AI không soạn bài theo ${isSub ? 'chủ đề con' : 'chủ đề'} này)</label>
+      <div id="tfmsg"></div>
+      <div class="actions">${item && isMgr() ? '<button type="button" class="btn ghost danger" data-del>Xóa</button>' : ''}<button type="button" class="btn ghost" data-close>Hủy</button><button type="button" class="btn" data-save>Lưu</button></div></form>`,
+  (m, close) => {
+    m.querySelector('[data-close]').onclick = close;
+    const pl = m.querySelector('#plist');
+    if (pl) {
+      const ids = () => m.querySelector('#tf-prompt_ids').value.split(/[\s,;]+/).filter(Boolean);
+      const draw = () => {
+        const qv = m.querySelector('#psearch').value.toLowerCase();
+        const cur = new Set(ids());
+        pl.innerHTML = lib.list.filter((p) => !qv || `${p.id} ${p.name} ${p.groupName}`.toLowerCase().includes(qv)).slice(0, 60)
+          .map((p) => `<label class="check"><input type="checkbox" value="${esc(p.id)}" ${cur.has(p.id) ? 'checked' : ''}> <b>${esc(p.id)}</b> ${esc(p.name)} <span class="muted">· ${esc(p.groupName)}</span></label>`).join('');
+        pl.querySelectorAll('input').forEach((i) => (i.onchange = () => {
+          const s = new Set(ids()); if (i.checked) s.add(i.value); else s.delete(i.value);
+          m.querySelector('#tf-prompt_ids').value = [...s].slice(0, 8).join(',');
+        }));
+      };
+      m.querySelector('#psearch').oninput = draw; draw();
+    }
+    m.querySelector('[data-del]')?.addEventListener('click', async () => {
+      if (!(await confirmBox('Xóa chủ đề?', `Xóa "${v.title}"${!isSub ? ' và toàn bộ chủ đề con' : ''}. Bài đã soạn vẫn giữ nguyên. Không hoàn tác được.`, 'Xóa', true))) return;
+      try { await api(`/api/topics/${item.id}`, { method: 'DELETE' }); close(); toast('Đã xóa'); render(); } catch (e) { toast(e.message); }
+    });
+    m.querySelector('[data-save]').onclick = async (e) => {
+      const b = { title: m.querySelector('#tf-title').value, status: m.querySelector('#tf-paused').checked ? 'paused' : 'active' };
+      for (const k of fields) b[k] = m.querySelector(`#tf-${k}`).value;
+      if (!isSub) b.share = m.querySelector('#tf-share').value;
+      if (!b.title.trim()) { m.querySelector('#tfmsg').innerHTML = '<div class="alert err">Vui lòng nhập tên.</div>'; return; }
+      e.target.disabled = true;
+      try {
+        if (item) await api(`/api/topics/${item.id}`, { method: 'PATCH', body: b });
+        else await api('/api/topics', { method: 'POST', body: { ...b, page_id: d.page.id, parent_id: parent?.id || null } });
+        close(); toast('Đã lưu'); render();
+      } catch (err) { m.querySelector('#tfmsg').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
+    };
+  });
+}
+
+const KKIND = { doc: ['Tài liệu', ''], news: ['Tin tức', 'warn'], feedback: ['Góp ý', 'ok'] };
+async function renderKnowledge(box, d) {
+  box.innerHTML = '<div class="muted">Đang tải…</div>';
+  const k = await api(`/api/knowledge?page_id=${encodeURIComponent(d.page.id)}`);
+  box.innerHTML = `<div class="card row between"><div class="muted small">AI chỉ đọc bản tóm tắt ngắn của mỗi mục (tiết kiệm chi phí). Tin tức được trợ lý tự đọc mỗi sáng từ <a href="#/nguon-noi-dung">Nguồn nội dung</a>, chọn tin khớp từ khóa của chủ đề.</div>
+    <div class="row">${k.can_edit ? '<button class="btn sm" id="addk">Nạp tài liệu</button>' : ''}${isMgr() ? '<button class="btn ghost sm" id="learn">Đọc tin ngay</button>' : ''}</div></div>
+    <div class="card">${k.items.length ? k.items.map((i) => `<div class="list-item kitem"><div class="grow">
+      <div class="row"><span class="badge ${KKIND[i.kind][1]}">${KKIND[i.kind][0]}</span><b>${esc(i.title)}</b>${!i.page_id ? '<span class="badge off">Mọi Trang</span>' : ''}</div>
+      <div class="small">${esc(i.digest || i.preview || '')}</div>
+      <div class="muted small">${fmtTime(i.created_at)}${i.created_by_name ? ` · ${esc(i.created_by_name)}` : ''}${i.url ? ` · <a href="${esc(i.url)}" target="_blank" rel="noopener">Nguồn</a>` : ''}</div></div>
+      <div class="row">${k.can_edit ? `<button class="btn ghost sm" data-kedit="${i.id}">Sửa tóm tắt</button>` : ''}${isMgr() ? `<button class="btn ghost sm danger" data-kdel="${i.id}">Xóa</button>` : ''}</div></div>`).join('') : '<div class="muted">Chưa có kiến thức. Nạp tài liệu (hồ sơ năng lực, kế hoạch sự kiện, báo cáo, bài báo) để AI viết đúng dữ kiện.</div>'}</div>`;
+  const byId = Object.fromEntries(k.items.map((i) => [i.id, i]));
+  box.querySelector('#addk')?.addEventListener('click', () => openKnowledgeForm(d));
+  box.querySelector('#learn')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang đọc tin…';
+    try { const r = await api('/api/assistant/run', { method: 'POST', body: { page_id: d.page.id, steps: ['learn'] } }); toast(r.log?.[r.log.length - 1] || 'Đã đọc tin'); renderKnowledge(box, d); } catch (err) { toast(err.message); e.target.disabled = false; }
+  });
+  box.querySelectorAll('[data-kedit]').forEach((b) => (b.onclick = () => {
+    const i = byId[b.dataset.kedit];
+    modal(`<h2>Sửa bản tóm tắt</h2><div class="muted small">${esc(i.title)}</div><textarea id="kd" rows="6">${esc(i.digest || '')}</textarea>
+      <div class="actions"><button class="btn ghost" data-close>Hủy</button><button class="btn" data-save>Lưu</button></div>`, (m, close) => {
+      m.querySelector('[data-close]').onclick = close;
+      m.querySelector('[data-save]').onclick = async () => { try { await api(`/api/knowledge/${i.id}`, { method: 'PATCH', body: { digest: m.querySelector('#kd').value } }); close(); renderKnowledge(box, d); } catch (e) { toast(e.message); } };
+    });
+  }));
+  box.querySelectorAll('[data-kdel]').forEach((b) => (b.onclick = async () => {
+    if (!(await confirmBox('Xóa mục kiến thức?', `Xóa "${byId[b.dataset.kdel].title}". Không hoàn tác được.`, 'Xóa', true))) return;
+    try { await api(`/api/knowledge/${b.dataset.kdel}`, { method: 'DELETE' }); renderKnowledge(box, d); } catch (e) { toast(e.message); }
+  }));
+}
+
+function openKnowledgeForm(d) {
+  modal(`<h2>Nạp tài liệu vào kho kiến thức</h2>
+    <form id="kf" novalidate><label for="kt">Tên tài liệu</label><input id="kt" maxlength="200" placeholder="Ví dụ: Kế hoạch tập huấn tháng 12 tại Krông Pắc">
+      <label for="kfile">Chọn file chữ (.txt, .md, .csv) hoặc dán nội dung bên dưới</label><input id="kfile" type="file" accept=".txt,.md,.csv,text/plain,text/markdown,text/csv">
+      <label for="kb">Nội dung</label><textarea id="kb" rows="8" placeholder="Dán nội dung tài liệu (tối đa 20.000 ký tự). Với PDF, Word: mở file, chép phần chữ rồi dán vào đây."></textarea>
+      <label for="ku">Liên kết nguồn (không bắt buộc)</label><input id="ku" type="url" placeholder="https://">
+      <label class="check"><input type="checkbox" id="kall"> Dùng cho mọi Fanpage</label>
+      <div class="muted small">AI tóm tắt tài liệu thành bản ngắn để dùng khi soạn bài. Không dán dữ liệu cá nhân của bà con (tên, số điện thoại, CCCD).</div>
+      <div id="kmsg"></div>
+      <div class="actions"><button type="button" class="btn ghost" data-close>Hủy</button><button type="button" class="btn" data-save>Nạp</button></div></form>`,
+  (m, close) => {
+    m.querySelector('[data-close]').onclick = close;
+    m.querySelector('#kfile').onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      if (f.size > 400000) { toast('File quá lớn (tối đa khoảng 400 KB chữ)'); return; }
+      m.querySelector('#kb').value = (await f.text()).slice(0, 20000);
+      if (!m.querySelector('#kt').value) m.querySelector('#kt').value = f.name.replace(/\.[^.]+$/, '');
+    };
+    m.querySelector('[data-save]').onclick = async (e) => {
+      e.target.disabled = true; m.querySelector('#kmsg').innerHTML = '<div class="muted small">Đang nạp và tóm tắt…</div>';
+      try {
+        await api('/api/knowledge', { method: 'POST', body: { page_id: d.page.id, title: m.querySelector('#kt').value, body: m.querySelector('#kb').value, url: m.querySelector('#ku').value, all_pages: m.querySelector('#kall').checked } });
+        close(); toast('Đã nạp tài liệu'); renderKnowledge(document.getElementById('tbody'), d);
+      } catch (err) { m.querySelector('#kmsg').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
+    };
+  });
+}
+
+async function renderSuggestions(box, d) {
+  box.innerHTML = '<div class="muted">Đang tải…</div>';
+  const s = await api(`/api/topics/suggestions?page_id=${encodeURIComponent(d.page.id)}`);
+  const F = { title: 'Tên', hook: 'Hook', message: 'Thông điệp', cta: 'CTA', facts: 'Dữ kiện mới', keywords: 'Từ khóa' };
+  box.innerHTML = `<div class="card row between"><div class="muted small">Trợ lý đọc tin tức, tài liệu và góp ý rồi đề xuất cập nhật chủ đề vào sáng thứ Hai. Quý khách chấp nhận thì chủ đề được cập nhật, bỏ qua thì giữ nguyên.</div>
+    ${isMgr() ? '<button class="btn ghost sm" id="sugnow">Đề xuất ngay</button>' : ''}</div>
+    ${s.items.length ? s.items.map((x) => `<div class="card sugg"><div class="row between"><b>${x.action === 'new' ? `Thêm chủ đề con${x.parent_title ? ` vào "${esc(x.parent_title)}"` : ''}` : `Cập nhật "${esc(x.topic_title || '')}"`}</b><span class="muted small">${fmtTime(x.created_at)}</span></div>
+      ${x.reason ? `<div class="small">Lý do: ${esc(x.reason)}</div>` : ''}
+      <div class="tgrid">${Object.entries(F).filter(([k]) => x.payload[k]).map(([k, l]) => `<div class="tf"><div class="muted small">${l}</div><div class="pre small">${esc(x.payload[k])}</div></div>`).join('')}</div>
+      ${d.can_edit ? `<div class="row"><button class="btn sm" data-acc="${x.id}">Chấp nhận</button><button class="btn ghost sm" data-dis="${x.id}">Bỏ qua</button></div>` : ''}</div>`).join('') : '<div class="card muted">Chưa có đề xuất nào đang chờ.</div>'}`;
+  box.querySelector('#sugnow')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang đề xuất…';
+    try { const r = await api('/api/assistant/run', { method: 'POST', body: { page_id: d.page.id, steps: ['suggest'] } }); toast(r.log?.[r.log.length - 1] || 'Xong'); renderSuggestions(box, d); } catch (err) { toast(err.message); e.target.disabled = false; }
+  });
+  box.querySelectorAll('[data-acc],[data-dis]').forEach((b) => (b.onclick = async () => {
+    const id = b.dataset.acc || b.dataset.dis;
+    try { await api(`/api/topics/suggestions/${id}/${b.dataset.acc ? 'accept' : 'dismiss'}`, { method: 'POST' }); toast(b.dataset.acc ? 'Đã cập nhật chủ đề' : 'Đã bỏ qua'); renderSuggestions(box, d); } catch (e) { toast(e.message); }
+  }));
+}
+
+function renderBrief(box, d) {
+  box.innerHTML = `<div class="card"><h2>Hồ sơ Fanpage "${esc(d.page.name)}"</h2>
+    <p class="muted small">AI đọc phần này trước mọi bài: Trang là ai, nói với ai, giọng văn, liên hệ, điều bắt buộc và điều không được viết. Lời kêu gọi, hotline, hashtag cuối bài thiết lập ở <a href="#/quy-dinh">Quy định đăng bài</a>.</p>
+    <textarea id="brief" rows="14" ${d.can_edit ? '' : 'readonly'}>${esc(d.brief)}</textarea>
+    ${d.can_edit ? '<div class="actions"><button class="btn" id="savebrief">Lưu hồ sơ</button></div>' : ''}</div>`;
+  box.querySelector('#savebrief')?.addEventListener('click', async () => {
+    try { await api('/api/topics/brief', { method: 'PUT', body: { page_id: d.page.id, brief: box.querySelector('#brief').value } }); d.brief = box.querySelector('#brief').value; toast('Đã lưu hồ sơ Fanpage'); } catch (e) { toast(e.message); }
+  });
+}
+
+// ---------- Trợ lý AI: kế hoạch tuần, bài cho ngày mai, tự kiểm tra, góp ý ----------
+const DSTATUS = { pending: ['Chờ duyệt', 'warn'], draft: ['Nháp', 'off'], scheduled: ['Đã hẹn giờ', 'ok'], published: ['Đã đăng', 'ok'], rejected: ['Từ chối', 'err'], failed: ['Lỗi', 'err'] };
+async function viewAssistant() {
+  layout('tro-ly', 'Trợ lý AI', 'Mỗi sáng 7h00: đọc tin, lập kế hoạch tuần, soạn bài cho ngày mai để Quý khách duyệt trong ngày', '<div class="muted">Đang tải…</div>');
+  const pick = await topicPagePick();
+  document.querySelector('.top .row').innerHTML = pick.sel;
+  pick.bind();
+  const v = document.getElementById('view');
+  if (!topicState.page) { v.innerHTML = '<div class="card">Chưa có Fanpage nào.</div>'; return; }
+  const [a, lib] = await Promise.all([api(`/api/assistant?page_id=${encodeURIComponent(topicState.page)}`), loadPromptLib()]);
+  const cfg = a.cfg;
+  const tname = (id) => { for (const d of a.drafts) if (d.topic_id === id) return d.ai_meta.topic_title; return ''; };
+  const topicsHint = a.page.subs ? '' : `<div class="alert warn">Trang này chưa có chủ đề con. <a href="#/chu-de">Mở Chủ đề</a> để nạp bộ mẫu hoặc tạo chủ đề, trợ lý mới soạn bài được.</div>`;
+  const usage = a.usage;
+  const plansHtml = a.plans.map((p) => `<section class="card plan"><div class="row between"><h2 style="margin:0">Kế hoạch tuần ${esc(p.week_start)}</h2><span class="muted small">${p.provider ? esc(p.provider) + ' · ' : ''}cập nhật ${fmtTime(p.updated_at)}</span></div>
+      ${p.focus ? `<p><b>Định hướng tuần:</b> ${esc(p.focus)}</p>` : ''}${p.note ? `<p class="muted small">Lưu ý: ${esc(p.note)}</p>` : ''}
+      <div class="tscroll"><table class="cards ptable"><thead><tr><th>Ngày</th><th>Giờ</th><th>Chủ đề con</th><th>Góc bài</th><th>Định dạng, hình ảnh</th><th>Vì sao</th></tr></thead><tbody>
+      ${(p.days || []).flatMap((d) => (d.posts.length ? d.posts : [{}]).map((x, i) => `<tr class="${d.date === a.tomorrow ? 'tmr' : ''}"><td data-l="Ngày">${i ? '' : `<b>${esc(d.weekday || '')}</b> ${esc(d.date.slice(8))}/${esc(d.date.slice(5, 7))}${d.date === a.tomorrow ? ' <span class="badge warn">Ngày mai</span>' : ''}`}</td>
+        <td data-l="Giờ">${esc(x.time || '')}</td><td data-l="Chủ đề">${esc(x.topic_title || tname(x.topic_id) || (x.topic_id ? `#${x.topic_id}` : '–'))}</td><td data-l="Góc bài">${esc(x.angle || '')}</td>
+        <td data-l="Định dạng">${esc(x.format || '')}${x.visual ? `<div class="muted small">${esc(x.visual)}</div>` : ''}${x.prompt_id ? promptChip(lib, x.prompt_id) : ''}</td><td data-l="Vì sao" class="small">${esc(x.why || '')}</td></tr>`)).join('')}
+      </tbody></table></div>
+      ${p.website?.length ? `<h3>Gợi ý bài website tuần này</h3>${p.website.map((w) => `<div class="tf"><b>${esc(w.title)}</b><div class="small pre">${esc(w.outline)}</div></div>`).join('')}` : ''}
+      ${a.can_run ? `<details class="pfb"><summary>Góp ý để AI lập lại kế hoạch tuần</summary><textarea rows="3" data-pfb="${esc(p.week_start)}" placeholder="Ví dụ: thứ Năm có tập huấn tại Krông Pắc, thêm bài thư mời; giảm bài kiến thức, tăng bài hình ảnh thật"></textarea><button class="btn sm" data-pfbgo="${esc(p.week_start)}">Lập lại kế hoạch</button></details>` : ''}
+    </section>`).join('') || `<div class="card muted">Chưa có kế hoạch tuần. ${a.can_run ? 'Bấm "Chạy ngay" để trợ lý lập kế hoạch và soạn bài cho ngày mai.' : ''}</div>`;
+  const draftsHtml = a.drafts.length ? a.drafts.map((d) => {
+    const m = d.ai_meta; const [lb, cls] = DSTATUS[d.status] || [d.status, 'off'];
+    const chk = m.check || {};
+    return `<article class="card adraft" id="ad-${d.id}"><div class="row between"><div><span class="badge ${cls}">${lb}</span> <b>${esc(m.topic_title || 'Bài trợ lý')}</b> <span class="muted small">${m.parent_title ? `· ${esc(m.parent_title)}` : ''}</span></div>
+        <span class="muted small">${d.scheduled_at ? `Hẹn ${fmtTime(d.scheduled_at)}` : ''}</span></div>
+      <div class="adgrid"><div class="msg">${esc(d.message)}</div>
+      <div class="admeta">
+        ${m.reason ? `<div class="tf"><div class="muted small">Vì sao nên đăng</div>${esc(m.reason)}</div>` : ''}
+        <div class="tf"><div class="muted small">Tự kiểm tra (${esc(chk.by || '')})</div>${chk.ok ? '<span class="badge ok">Đạt</span>' : `<span class="badge warn">Cần xem lại</span>`}${chk.fixed ? ' <span class="muted small">AI đã tự sửa</span>' : ''}${(chk.ok ? [] : chk.remaining?.length ? chk.remaining : chk.issues || []).map((x) => `<div class="small">• ${esc(x)}</div>`).join('')}</div>
+        ${m.visual ? `<div class="tf"><div class="muted small">Hình ảnh, video cần làm</div>${esc(m.visual)}${m.prompt_id ? `<div>${promptChip(lib, m.prompt_id)}</div>` : ''}</div>` : ''}
+        ${m.storyboard ? `<div class="tf"><div class="muted small">Storyboard</div><div class="pre small">${esc(m.storyboard)}</div></div>` : ''}${storyboardHtml(lib, m.storyboard_id)}
+        ${m.website ? `<div class="tf"><div class="muted small">Gợi ý bài website</div><b>${esc(m.website.title)}</b><div class="small pre">${esc(m.website.outline || '')}</div></div>` : ''}
+        ${m.ads ? `<div class="tf"><div class="muted small">Gợi ý quảng cáo</div><div class="small">${esc(m.ads)}</div></div>` : ''}
+        ${(m.feedback || []).length ? `<div class="tf"><div class="muted small">Góp ý đã gửi</div>${m.feedback.map((f) => `<div class="small">• ${esc(f.text)}</div>`).join('')}</div>` : ''}
+      </div></div>
+      ${['draft', 'pending', 'rejected', 'failed'].includes(d.status) ? `<details class="pfb"><summary>Góp ý để AI viết lại</summary><textarea rows="2" data-rv="${d.id}" placeholder="Ví dụ: mở bài bằng câu hỏi, nhắc buổi tập huấn ngày 5/12, bớt biểu tượng"></textarea><button class="btn sm" data-rvgo="${d.id}">Viết lại</button></details>
+      <div class="row">${a.can_run ? `<button class="btn sm" data-appr="${d.id}">Duyệt, hẹn đăng ${d.scheduled_at ? fmtTime(d.scheduled_at) : ''}</button>` : ''}<button class="btn ghost sm" data-cedit="${d.id}">Sửa trong Lịch đăng</button>${a.can_run && d.status === 'pending' ? `<button class="btn ghost sm danger" data-rej="${d.id}">Từ chối</button>` : ''}</div>` : ''}
+    </article>`;
+  }).join('') : '<div class="card muted">Chưa có bài nào do trợ lý soạn.</div>';
+  v.innerHTML = `${topicsHint}
+    <div class="grid ascfg"><div class="card"><h2>Chạy tự động</h2>
+      <label class="check"><input type="checkbox" id="aon" ${cfg.on ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Mỗi sáng 7h00 soạn bài cho ngày mai (chờ Quý khách duyệt, không tự đăng)</label>
+      <div class="row"><label for="aper" class="grow">Số bài mỗi ngày</label><select id="aper" class="sm" ${a.can_run ? '' : 'disabled'}><option value="1" ${cfg.per_day === 1 ? 'selected' : ''}>1 bài</option><option value="2" ${cfg.per_day === 2 ? 'selected' : ''}>2 bài</option></select></div>
+      <div class="row"><label for="at1" class="grow">Giờ đăng gợi ý</label><input id="at1" type="time" value="${esc(cfg.times[0] || '19:30')}" ${a.can_run ? '' : 'disabled'}><input id="at2" type="time" value="${esc(cfg.times[1] || '11:30')}" ${a.can_run ? '' : 'disabled'}></div>
+      <label class="check"><input type="checkbox" id="aweb" ${cfg.website ? 'checked' : ''} ${a.can_run ? '' : 'disabled'}> Gợi ý thêm bài cho website</label>
+      ${a.can_run ? '<div class="row"><button class="btn sm" id="asave">Lưu cài đặt</button><button class="btn ghost sm" id="arun">Chạy ngay</button></div>' : ''}
+      <div class="muted small">Lần chạy gần nhất: ${a.last_run ? fmtTime(a.last_run) : 'chưa chạy'}</div>${a.last_log.length ? `<details><summary class="small">Nhật ký lần chạy</summary>${a.last_log.map((l) => `<div class="small">• ${esc(l)}</div>`).join('')}</details>` : ''}</div>
+    <div class="card"><h2>AI và chi phí tháng ${esc(usage.month.slice(5))}/${esc(usage.month.slice(0, 4))}</h2>
+      <div>AI đang dùng: <b>${esc(a.provider || 'chưa cài')}</b></div>
+      ${a.models ? `<div class="muted small">Viết bài, kế hoạch: ${esc(a.models.write)} · Tóm tắt tin, tự kiểm tra, đề xuất: ${esc(a.models.fast)}</div>` : `<div class="muted small">${me.role === 'owner' ? 'Để dùng Claude: thêm biến bí mật ANTHROPIC_API_KEY trong Cloudflare (Worker farmbase-social, Settings, Variables and Secrets). Chưa có thì hệ thống dùng Workers AI miễn phí.' : ''}</div>`}
+      <div class="stat"><span class="n">${usage.usd ? `~${usage.usd.toLocaleString('vi-VN')} USD` : '0 USD'}</span> <span class="muted small">ước tính tháng này${usage.rows.length ? ` · ${usage.rows.reduce((x, r) => x + r.calls, 0)} lượt gọi` : ''}</span></div>
+      <div class="muted small">Tiết kiệm: Haiku cho việc nhanh, Sonnet chỉ khi viết bài; AI chỉ đọc bản tóm tắt chủ đề và kiến thức; phần hướng dẫn cố định được cache; mỗi Trang 1 lần lập kế hoạch mỗi tuần và 1 lần soạn bài mỗi ngày.</div></div></div>
+    <h2 class="sec">Bài trợ lý soạn</h2>${draftsHtml}
+    <h2 class="sec">Kế hoạch tuần</h2>${plansHtml}`;
+  bindPrompts(v, lib);
+  const times = () => [v.querySelector('#at1').value, v.querySelector('#at2').value].filter(Boolean);
+  v.querySelector('#asave')?.addEventListener('click', async () => {
+    try { await api('/api/assistant/settings', { method: 'PUT', body: { page_id: a.page.id, on: v.querySelector('#aon').checked, per_day: Number(v.querySelector('#aper').value), times: times(), website: v.querySelector('#aweb').checked } }); toast('Đã lưu cài đặt'); } catch (e) { toast(e.message); }
+  });
+  v.querySelector('#arun')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang chạy, khoảng 1 phút…';
+    try { const r = await api('/api/assistant/run', { method: 'POST', body: { page_id: a.page.id, steps: ['learn', 'plan', 'drafts'] } }); toast(r.log?.slice(-1)[0] || 'Xong'); viewAssistant(); } catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Chạy ngay'; }
+  });
+  v.querySelectorAll('[data-pfbgo]').forEach((b) => (b.onclick = async () => {
+    const fb = v.querySelector(`[data-pfb="${b.dataset.pfbgo}"]`).value.trim();
+    if (!fb) { toast('Vui lòng nhập góp ý'); return; }
+    b.disabled = true; b.textContent = 'Đang lập lại…';
+    try { await api('/api/assistant/plan-feedback', { method: 'POST', body: { page_id: a.page.id, week_start: b.dataset.pfbgo, feedback: fb } }); toast('Đã lập lại kế hoạch tuần'); viewAssistant(); } catch (e) { toast(e.message); b.disabled = false; b.textContent = 'Lập lại kế hoạch'; }
+  }));
+  v.querySelectorAll('[data-rvgo]').forEach((b) => (b.onclick = async () => {
+    const fb = v.querySelector(`[data-rv="${b.dataset.rvgo}"]`).value.trim();
+    if (!fb) { toast('Vui lòng nhập góp ý'); return; }
+    b.disabled = true; b.textContent = 'AI đang viết lại…';
+    try { await api(`/api/assistant/revise/${b.dataset.rvgo}`, { method: 'POST', body: { feedback: fb } }); toast('Đã viết lại theo góp ý. Góp ý được lưu cho các bài sau.'); viewAssistant(); } catch (e) { toast(e.message); b.disabled = false; b.textContent = 'Viết lại'; }
+  }));
+  const byId = Object.fromEntries(a.drafts.map((d) => [d.id, d]));
+  v.querySelectorAll('[data-appr]').forEach((b) => (b.onclick = async () => {
+    const d = byId[b.dataset.appr];
+    const when = d.scheduled_at && d.scheduled_at > Date.now() / 1000 + 600 ? `hẹn đăng lúc ${fmtTime(d.scheduled_at)}` : 'đăng ngay';
+    if (!(await confirmBox('Duyệt bài?', `Bài sẽ được gửi lên Fanpage "${a.page.name}" và ${when}.`, 'Duyệt'))) return;
+    b.disabled = true;
+    try { const r = await api(`/api/content/${d.id}/approve`, { method: 'POST' }); toast(r.item.status === 'failed' ? `Facebook báo lỗi: ${r.item.last_error || ''}` : 'Đã duyệt và gửi lên Facebook'); viewAssistant(); } catch (e) { toast(e.message); b.disabled = false; }
+  }));
+  v.querySelectorAll('[data-rej]').forEach((b) => (b.onclick = async () => {
+    if (!(await confirmBox('Từ chối bài?', 'Bài chuyển sang Từ chối, có thể sửa lại sau.', 'Từ chối', true))) return;
+    try { await api(`/api/content/${b.dataset.rej}/reject`, { method: 'POST', body: { reason: 'Từ chối ở Trợ lý AI' } }); viewAssistant(); } catch (e) { toast(e.message); }
+  }));
+  v.querySelectorAll('[data-cedit]').forEach((b) => (b.onclick = () => { Object.assign(calState, { status: '', page: a.page.id, view: 'list', focus: Number(b.dataset.cedit) }); go('lich-dang'); }));
+}
+
 async function render() {
   const { path, q } = parseHash();
   if (!me) {
@@ -1655,6 +2036,8 @@ async function render() {
       case 'bai-dang': return await viewPosts(q);
       case 'bao-cao': return await viewReport();
       case 'nguon-noi-dung': return await viewSources();
+      case 'chu-de': return me.role !== 'agent' ? await viewTopics(q) : go('tong-quan');
+      case 'tro-ly': return me.role !== 'agent' ? await viewAssistant() : go('tong-quan');
       case 'quang-cao': return me.role === 'owner' || me.role === 'manager' ? await viewAds(q) : go('tong-quan');
       case 'lich-dang': return await viewCalendar(q);
       case 'quy-dinh': return await viewRules();

@@ -362,3 +362,39 @@ h2.sec { margin: 22px 0 10px; }
 .pact { gap: 6px; flex-wrap: wrap; }
 @media (max-width: 899px) { .ovgrid { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .kpi .n { font-size: 22px; } .pcards { grid-template-columns: 1fr; } }
+
+/* Chủ đề nội dung và Trợ lý AI */
+.seg.tabs { margin-bottom: 12px; flex-wrap: wrap; }
+.topic .subs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 12px; }
+.topic .sub { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; background: var(--bg); }
+.topic .sub:hover, .topic .sub:focus { border-color: var(--leaf); outline: none; }
+.topic .sub .hk { margin: 4px 0; font-style: italic; }
+.topic .sub .chips { margin-top: 6px; }
+.topic.paused, .sub.paused { opacity: .6; }
+.thead2 { align-items: flex-start; gap: 10px; }
+.chip.pchip { cursor: pointer; font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 14px; }
+.tf { margin: 8px 0; }
+.pre { white-space: pre-wrap; }
+.secret.pre { max-height: 50vh; overflow: auto; font-size: 13px; }
+.plist { max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin-top: 6px; }
+.plist .check { display: block; font-size: 13px; margin: 4px 0; }
+details.ppick { margin-top: 6px; }
+details.ppick summary, details.sb summary, details.pfb summary { cursor: pointer; color: var(--leaf); font-size: 14px; }
+details.sb { margin: 8px 0; }
+table.sbt { font-size: 13px; margin-top: 6px; }
+.kitem { align-items: flex-start; gap: 10px; }
+.kitem .row { gap: 6px; }
+.ascfg { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.ascfg .row { margin: 8px 0; gap: 8px; }
+.ascfg input[type=time] { width: auto; }
+.adraft .adgrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; margin: 10px 0; }
+.adraft .msg { white-space: pre-wrap; background: var(--bg); border-radius: 10px; padding: 12px; }
+.adraft .admeta .tf { border-bottom: 1px dashed var(--line); padding-bottom: 6px; }
+details.pfb { margin: 8px 0; }
+details.pfb textarea { margin: 6px 0; }
+.ptable td { vertical-align: top; font-size: 14px; }
+.ptable tr.tmr td { background: var(--sprout); }
+.aiwhy { margin: 4px 0; color: var(--forest); }
+@media (prefers-color-scheme: dark) { .aiwhy { color: var(--leaf); } }
+@media (max-width: 899px) { .adraft .adgrid { grid-template-columns: 1fr; } }

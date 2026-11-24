@@ -28,7 +28,7 @@ export function safeUrl(v, env) {
   return u;
 }
 
-async function fetchText(url, accept = 'text/html,application/xhtml+xml,application/xml,*/*') {
+export async function fetchText(url, accept = 'text/html,application/xhtml+xml,application/xml,*/*') {
   const res = await fetch(url, { headers: { 'user-agent': UA, accept }, redirect: 'follow', cf: { cacheTtl: 300 } });
   if (!res.ok) throw new HttpError(502, `Website trả lỗi ${res.status}`, 'fetch_failed');
   const text = await res.text();

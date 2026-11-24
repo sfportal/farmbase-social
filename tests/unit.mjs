@@ -53,4 +53,46 @@ const longP = 'Câu một khá dài về kỹ thuật chăm sóc vườn sầu r
 assert.equal(shortParagraphs(longP), 'Câu một khá dài về kỹ thuật chăm sóc vườn sầu riêng sau thu hoạch cho bà con. Câu hai nói về lịch bón phân hợp lý trong mùa mưa.\n\nCâu ba mời bà con đăng ký tham gia buổi tập huấn sắp tới.');
 assert.equal(shortParagraphs('Mở đầu.\n- Ý một\n- Ý hai\nKết.'), 'Mở đầu.\n\n- Ý một\n- Ý hai\n\nKết.');
 assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }), 'Chào bà con.', 'bỏ dòng hashtag thiếu dấu #');
+
+// Trợ lý: ngày giờ Việt Nam, kiểm tra quy tắc, đọc JSON của AI, bộ chủ đề mẫu
+{
+  const { vnDate, weekStart, addDays, tsAt, ruleCheck } = await import('../src/routes/assistant.js');
+  const { parseJson } = await import('../src/lib/ai.js');
+  const { TEMPLATES, templateFor } = await import('../src/lib/topic-templates.js');
+  assert.equal(vnDate(Date.UTC(2026, 10, 23, 18, 0) / 1000), '2026-11-24', '1h sáng giờ Việt Nam đã sang ngày mới');
+  assert.equal(weekStart('2026-11-29'), '2026-11-23', 'Chủ nhật thuộc tuần bắt đầu thứ Hai');
+  assert.equal(weekStart('2026-11-23'), '2026-11-23');
+  assert.equal(addDays('2026-11-30', 1), '2026-12-01');
+  assert.equal(tsAt('2026-11-25', '19:30'), Date.UTC(2026, 10, 25, 12, 30) / 1000);
+  assert.deepEqual(ruleCheck('FarmBase giúp bà con ghi nhật ký.'), []);
+  assert.ok(ruleCheck('BVI cấp mã vùng trồng nhanh').length === 1);
+  assert.deepEqual(ruleCheck('Việc cấp mã số vùng trồng thuộc thẩm quyền cơ quan quản lý nhà nước; BVI hỗ trợ kỹ thuật.'), []);
+  assert.ok(ruleCheck('Gói Vàng 1,5 tỷ đồng', { campaign: true }).length >= 1, 'chặn chi phí tài trợ trên Fanpage chiến dịch');
+  assert.ok(ruleCheck('Chiến dịch đã đạt 10.000 ha', { campaign: true }).length === 1);
+  assert.ok(ruleCheck('Giải pháp số 1 cho bà con').length === 1);
+  assert.deepEqual(parseJson('```json\n{"a":1}\n```'), { a: 1 });
+  assert.deepEqual(parseJson('Đây là kết quả: {"posts":[{"x":"y"}]} xong'), { posts: [{ x: 'y' }] });
+  assert.equal(parseJson('không có'), null);
+  assert.equal(templateFor('Chiến dịch 10000ha'), '10000ha');
+  assert.equal(templateFor('Chiến dịch 10.000 ha'), '10000ha');
+  assert.equal(templateFor('FarmBase'), 'farmbase');
+  assert.equal(templateFor('HTX An Nông'), null);
+  for (const [k, tpl] of Object.entries(TEMPLATES)) {
+    assert.equal(tpl.topics.reduce((a, t) => a + t.share, 0), 100, `${k}: tỷ trọng 100%`);
+    for (const t of tpl.topics) for (const c of t.children) {
+      assert.ok(c.title && c.goal && c.hook && c.message && c.cta && c.facts && c.formats && c.visual && c.prompt_ids, `${k}/${c.title}: đủ trường`);
+      assert.deepEqual(ruleCheck(`${c.hook}\n${c.message}\n${c.cta}`, { campaign: k === '10000ha' }), [], `${k}/${c.title}: đúng quy tắc`);
+    }
+  }
+  // Mã prompt trong bộ mẫu đều có trong Thư viện prompt
+  globalThis.window = {};
+  await import('../public/prompt/data.js');
+  await import('../public/prompt/storyboard-mau.js');
+  const ids = new Set(window.PROMPTS.map((p) => p.id));
+  const sbs = new Set(window.SB_MAU.map((x) => x.id));
+  for (const tpl of Object.values(TEMPLATES)) for (const t of tpl.topics) for (const c of t.children) {
+    for (const id of c.prompt_ids.split(',')) assert.ok(ids.has(id), `prompt ${id} có trong thư viện`);
+    if (c.storyboard_id) assert.ok(sbs.has(c.storyboard_id), `storyboard ${c.storyboard_id} có trong thư viện`);
+  }
+}
 console.log('unit: đạt');

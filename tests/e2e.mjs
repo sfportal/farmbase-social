@@ -128,7 +128,7 @@ function sql(command) {
 }
 
 // Làm sạch D1 cục bộ và thêm 2 Fanpage giả để thử phân quyền.
-sql("DELETE FROM social_sources; DELETE FROM social_messages; DELETE FROM social_conversations; DELETE FROM social_settings; DELETE FROM social_content; DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
+sql("DELETE FROM social_topic_suggestions; DELETE FROM social_plans; DELETE FROM social_knowledge; UPDATE social_content SET topic_id = NULL; DELETE FROM social_topics; DELETE FROM social_sources; DELETE FROM social_messages; DELETE FROM social_conversations; DELETE FROM social_settings; DELETE FROM social_content; DELETE FROM social_sessions; DELETE FROM social_user_pages; DELETE FROM social_oauth_states; DELETE FROM social_audit_log; DELETE FROM social_pages; DELETE FROM social_users;");
 const KEY = 'khoa-thu-nghiem-chi-dung-tren-may';
 const encA = await encryptSecret('ma-trang-111', KEY);
 const encB = await encryptSecret('ma-trang-222', KEY);
@@ -713,6 +713,89 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
 }
 
 // 11. Giao diện trên máy tính và điện thoại
+// 10f. Chủ đề nội dung, kho kiến thức, trợ lý AI soạn bài chờ duyệt
+{
+  r = await owner.req('/api/topics?page_id=111');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.topics.length, 0, 'tên Trang không khớp bộ mẫu thì không tự nạp');
+  r = await viewer.req('/api/topics?page_id=111');
+  assert.equal(r.status, 404, 'biên tập không xem chủ đề Trang không được giao');
+  r = await viewer.req('/api/topics/seed', { method: 'POST', body: { page_id: '222', template: 'farmbase' } });
+  assert.equal(r.status, 403, 'biên tập không nạp bộ mẫu');
+  r = await owner.req('/api/topics/seed', { method: 'POST', body: { page_id: '111', template: '10000ha' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/topics?page_id=111');
+  assert.equal(r.data.topics.length, 5);
+  assert.equal(r.data.topics.reduce((a, t) => a + t.share, 0), 100, 'tỷ trọng bộ mẫu bằng 100%');
+  const sub = r.data.topics[0].children[0];
+  assert.equal(sub.title, 'Chiến dịch 10.000 ha trong 60 giây');
+  assert.ok(sub.hook && sub.cta && sub.facts && sub.prompt_ids && sub.ads, 'chủ đề con có hook, CTA, dữ kiện, prompt, ads');
+  assert.ok(r.data.brief.includes('MỤC TIÊU'), 'hồ sơ Fanpage có quy tắc bắt buộc');
+  // Bộ mẫu không có câu sai quy tắc nội dung
+  const all = JSON.stringify(r.data.topics);
+  assert.ok(!/DurianBase|8,2 tỷ|BVI cấp mã|FarmBase cấp mã/.test(all), 'bộ mẫu đúng quy tắc');
+  r = await viewer.req('/api/topics', { method: 'POST', body: { page_id: '222', title: 'Chủ đề thử B' } });
+  assert.equal(r.status, 201);
+  const parentB = r.data.id;
+  r = await viewer.req('/api/topics', { method: 'POST', body: { page_id: '222', parent_id: parentB, title: 'Con B', hook: 'Hook B', prompt_ids: 'ha-01, xx, cd-04', keywords: 'sầu riêng' } });
+  assert.equal(r.status, 201);
+  const subB = r.data.id;
+  r = await viewer.req('/api/topics?page_id=222');
+  assert.equal(r.data.topics[0].children[0].prompt_ids, 'ha-01,cd-04', 'chỉ giữ mã prompt hợp lệ');
+  r = await viewer.req(`/api/topics/${subB}`, { method: 'PATCH', body: { cta: 'Nhắn tin Fanpage' } });
+  assert.equal(r.status, 200);
+  r = await viewer.req(`/api/topics/${subB}`, { method: 'DELETE' });
+  assert.equal(r.status, 403, 'biên tập không xóa chủ đề');
+  // Kho kiến thức: nạp tài liệu có tóm tắt, phân quyền
+  r = await owner.req('/api/knowledge', { method: 'POST', body: { page_id: '111', title: 'Lịch tập huấn tháng 12', body: 'Ngày 05/12/2026 tập huấn tại xã Krông Pắc cho 20 bà con, nội dung hồ sơ mã số vùng trồng.' } });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.equal(r.data.digest, 'Tóm tắt tài liệu thử');
+  r = await viewer.req('/api/knowledge?page_id=222');
+  assert.equal(r.data.items.length, 0, 'tài liệu riêng Trang A không hiện ở Trang B');
+  // Trợ lý: chạy ngay → kế hoạch tuần, bài cho ngày mai ở trạng thái chờ duyệt, có lý do và kết quả tự kiểm tra
+  r = await viewer.req('/api/assistant/run', { method: 'POST', body: { page_id: '222' } });
+  assert.equal(r.status, 403, 'biên tập không chạy trợ lý');
+  r = await owner.req('/api/assistant/settings', { method: 'PUT', body: { page_id: '111', on: true, per_day: 1, times: ['19:30'], website: true } });
+  assert.equal(r.status, 200);
+  r = await owner.req('/api/assistant/run', { method: 'POST', body: { page_id: '111', steps: ['learn', 'plan', 'drafts'] } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.log.some((l) => /soạn 1 bài/.test(l)), r.data.log.join(' | '));
+  r = await owner.req('/api/assistant?page_id=111');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.plans.length >= 1, true, 'có kế hoạch tuần');
+  assert.equal(r.data.plans.at(-1).days.length, 7);
+  const draft = r.data.drafts[0];
+  assert.equal(draft.status, 'pending', 'bài trợ lý soạn luôn chờ duyệt');
+  assert.ok(draft.ai_meta.reason && draft.ai_meta.check && draft.ai_meta.visual && draft.ai_meta.website?.title, JSON.stringify(draft.ai_meta));
+  assert.ok(draft.message.startsWith('Bài viết thử của trợ lý AI'), draft.message);
+  assert.ok(draft.scheduled_at > nowS() + 3600, 'hẹn giờ ngày mai');
+  r = await owner.req('/api/assistant/run', { method: 'POST', body: { page_id: '111', steps: ['drafts'] } });
+  assert.ok(r.data.log.some((l) => /đã có bài/.test(l)), 'không soạn trùng ngày');
+  // Góp ý để AI viết lại: lưu góp ý vào kho kiến thức
+  r = await owner.req(`/api/assistant/revise/${draft.id}`, { method: 'POST', body: { feedback: 'Nhắc buổi tập huấn ngày 05/12' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.message.includes('Đã sửa theo góp ý'));
+  assert.equal(r.data.message.split('Hotline A').length, 2, 'không lặp phần cuối bài');
+  assert.equal(r.data.message.split('Nhắn tin cho Trang A').length, 2, 'không lặp lời kêu gọi');
+  r = await owner.req('/api/knowledge?page_id=111&kind=feedback');
+  assert.equal(r.data.items.length, 1);
+  r = await owner.req('/api/assistant/plan-feedback', { method: 'POST', body: { page_id: '111', feedback: 'Thêm bài thư mời' } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // Đề xuất cập nhật chủ đề, chấp nhận thì thêm chủ đề con
+  r = await owner.req('/api/assistant/run', { method: 'POST', body: { page_id: '111', steps: ['suggest'] } });
+  assert.equal(r.status, 200);
+  r = await owner.req('/api/topics/suggestions?page_id=111');
+  assert.equal(r.data.items.length, 1, JSON.stringify(r.data));
+  r = await owner.req(`/api/topics/suggestions/${r.data.items[0].id}/accept`, { method: 'POST' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await owner.req('/api/topics?page_id=111');
+  assert.ok(r.data.topics.some((t) => t.children.some((c) => c.title === 'Chủ đề con đề xuất thử')));
+  // Lịch đăng thấy bài trợ lý kèm lý do
+  r = await owner.req('/api/content?page_id=111&status=pending');
+  assert.ok(r.data.items.some((i) => i.ai?.reason), 'lịch đăng có ghi chú trợ lý');
+  step('chủ đề nội dung, bộ mẫu, kho kiến thức, trợ lý AI lập kế hoạch tuần, soạn bài chờ duyệt, tự kiểm tra, góp ý, đề xuất cập nhật, đúng quyền');
+}
+
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 mkdirSync('test-output', { recursive: true });
@@ -734,9 +817,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung'].includes(route) ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung', 'chu-de', 'tro-ly'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
@@ -816,6 +899,29 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   assert.ok((await page.inputValue('#msg')).includes('Nguồn: http://localhost:8791/bai/1'), 'mở form soạn bài có sẵn nội dung AI');
   await page.screenshot({ path: `test-output/${label}-nguon-ai-viet.png` });
   await page.keyboard.press('Escape');
+  await page.goto(`${BASE}/#/chu-de`);
+  await page.waitForSelector('#tpage');
+  await page.selectOption('#tpage', '111');
+  await page.waitForSelector('[data-view-sub]');
+  await page.screenshot({ path: `test-output/${label}-chu-de-111.png`, fullPage: true });
+  await page.click('[data-view-sub]');
+  await page.waitForSelector('.modal .tf');
+  await page.screenshot({ path: `test-output/${label}-chu-de-con.png` });
+  await page.click('.modal [data-prompt]');
+  await page.waitForSelector('.secret.pre');
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  for (const tab of ['kien-thuc', 'de-xuat', 'ho-so']) {
+    await page.click(`[data-tab="${tab}"]`);
+    await page.waitForTimeout(500);
+    const ov = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(ov <= 1, `${label} chủ đề ${tab}: tràn ngang ${ov}px`);
+    await page.screenshot({ path: `test-output/${label}-chu-de-${tab}.png`, fullPage: true });
+  }
+  await page.goto(`${BASE}/#/tro-ly`);
+  await page.waitForSelector('.adraft');
+  const ova = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  assert.ok(ova <= 1, `${label} trợ lý: tràn ngang ${ova}px`);
+  await page.screenshot({ path: `test-output/${label}-tro-ly-111.png`, fullPage: true });
   await page.goto(`${BASE}/#/nhan-vien`);
   await page.waitForSelector('#view table'); // nút Thêm chỉ hoạt động sau khi tải xong danh sách
   await page.click('#add');

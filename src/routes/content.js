@@ -54,6 +54,7 @@ function shape(row, t) {
     fb_post_id: row.fb_post_id, reject_reason: row.reject_reason, last_error: row.last_error,
     created_by: row.created_by, created_by_name: row.created_by_name || row.created_by_email,
     approved_by_name: row.approved_by_name, created_at: row.created_at, updated_at: row.updated_at,
+    topic_id: row.topic_id || null, ai: row.ai_meta ? (() => { try { return JSON.parse(row.ai_meta); } catch { return null; } })() : null,
   };
 }
 
