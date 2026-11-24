@@ -149,7 +149,7 @@
         placeholders_vi: placeholders(p.textVi || p.text), placeholders_en: placeholders(p.textEn || ''),
         prompt_vi: p.textVi || p.text, prompt_en: p.textEn || '',
         situations: sit[p.id] ? [...sit[p.id]] : [],
-        source: p.nguon || 'Prompt BVI tự viết', source_links: p.links || [],
+        created: p.ngay || '', source: p.nguon || 'Prompt BVI tự viết', source_links: p.links || [],
         license: 'Bản viết mới của BVI, dùng tự do. Nguồn chỉ là ý tưởng; không chép nguyên văn prompt gốc.'
       })),
       situations: TH.map(t => ({ id: t.id, group: t.nhom, title: t.ten, when: t.khi, inputs: t.vao,

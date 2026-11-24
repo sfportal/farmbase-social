@@ -38,6 +38,7 @@ h1{font-size:22px;margin:4px 0 4px;color:var(--d)}h2{font-size:18px;color:var(--
 .card:hover{box-shadow:0 8px 24px #0001;transform:translateY(-2px)}
 .card .bd{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
 .card .id{font-size:12px;font-weight:700;color:var(--g);letter-spacing:.4px}
+.card .ng{display:block;font-size:11.5px;color:var(--mut);margin-top:1px}.card .ng em{font-style:normal;font-weight:700;color:#fff;background:#C9A227;border-radius:5px;padding:0 6px;margin-left:4px}
 .card .nm{font-weight:700;font-size:15px;line-height:1.35;cursor:pointer}
 .card .dc{font-size:13px;color:var(--mut);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .card .ft{display:flex;gap:6px;align-items:center;margin-top:auto;padding-top:6px;flex-wrap:wrap}
@@ -608,6 +609,7 @@ header nav a.home{opacity:.85;border-right:1px solid rgba(255,255,255,.25);margi
   <input class="search" id="q" placeholder="Tìm: đếm ngược, QR, logo, khuyến mãi, flycam...">
   <span id="khoBar"><span class="chip sm" data-k="9:16">9:16</span> <span class="chip sm" data-k="16:9">16:9</span> <span class="chip sm" data-k="1:1">1:1</span> <span class="chip sm" data-k="4:5">4:5</span></span>
   <span class="chip sm" id="favOnly">★ Đã đánh dấu</span>
+  <span class="chip sm" id="newFirst" title="Xếp mẫu theo ngày tạo, mới nhất lên đầu">Mới nhất trước</span>
   <button class="btn sm o" id="aiCur" title="Các mẫu đang hiện theo bộ lọc, kèm khung, quy tắc, tình huống, storyboard mẫu">Xuất JSON cho AI (đang lọc)</button>
   <button class="btn sm o" id="aiAll" title="Toàn bộ thư viện: video, hình ảnh, tài liệu">JSON cả thư viện</button>
  </div>
@@ -925,7 +927,9 @@ const ALLKH=[...Object.values(KHS),...Object.values(KHS_EN)].filter(Boolean);
 let LANG=LS.get('tvp_lang','vi');
 const TXT=(p,l)=>l==='en'?(p.textEn||p.text):(p.textVi||p.text);
 const hasEn=p=>!!p.textEn, hasVi=p=>!!(p.textVi||!p.origEn);
-let fKind='video',fGrp='all',fSub='',fDa='',fKho=new Set(),fFav=false,fQ='';
+let fKind='video',fGrp='all',fSub='',fDa='',fKho=new Set(),fFav=false,fQ='',fNew=false;
+const ngayN=p=>{const m=(p.ngay||'').split('/');return m.length===3?+(m[2]+m[1]+m[0]):0};
+const isNew=p=>{const n=ngayN(p);if(!n)return false;const s=String(n),d=new Date(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8));return (Date.now()-d)/864e5<=14};
 let FAV=new Set(LS.get('tvp_fav',[]));
 const cnt=f=>P.filter(p=>p.kind===fKind&&f(p)).length;
 function renderBars(){const K=KINDS[fKind];$('#libH').textContent=K.h;$('#libS').textContent=K.s;$('#q').placeholder=K.q;
@@ -941,6 +945,7 @@ $('#subBar').onclick=e=>{const c=e.target.closest('[data-s]');if(!c)return;fSub=
 $('#daBar').onclick=e=>{const c=e.target.closest('[data-d]');if(!c)return;fDa=fDa===c.dataset.d?'':c.dataset.d;renderBars();renderGrid()};
 $$('[data-k]').forEach(c=>c.onclick=()=>{const k=c.dataset.k;fKho.has(k)?fKho.delete(k):fKho.add(k);c.classList.toggle('on');renderGrid()});
 $('#favOnly').onclick=e=>{fFav=!fFav;e.currentTarget.classList.toggle('on');renderGrid()};
+$('#newFirst').onclick=e=>{fNew=!fNew;e.currentTarget.classList.toggle('on');renderGrid()};
 $('#q').oninput=e=>{fQ=e.target.value.trim().toLowerCase();renderGrid()};
 $('#langBar').onclick=e=>{const b=e.target.closest('[data-l]');if(!b)return;LANG=b.dataset.l;LS.set('tvp_lang',LANG);$$('#langBar button').forEach(x=>x.classList.toggle('on',x===b))};
 $$('#langBar button').forEach(x=>x.classList.toggle('on',x.dataset.l===LANG));
@@ -954,7 +959,8 @@ $('#aiAll').onclick=()=>{dl('thu-vien-prompt-ai.json',JSON.stringify(aiJson(P,'T
 function renderGrid(){
  const q=norm(fQ);
  const L=LAST=P.filter(p=>p.kind===fKind&&(fGrp==='all'||p.group===fGrp)&&(!fSub||p.sub===fSub)&&(!fDa||p.duan.includes(fDa))&&(fKind==='doc'||!fKho.size||[...fKho].some(k=>p.kho.includes(k)))&&(!fFav||FAV.has(p.id))&&(!q||norm(p.id+' '+p.name+' '+p.sub+' '+p.duan.join(' ')+' '+p.dungcho+' '+p.bangoc+' '+p.text+' '+(p.textEn||'')).includes(q)));
- $('#grid').innerHTML=L.length?L.map(p=>`<div class="card">${demo(p.demo)}<div class="bd"><span class="id">${p.id.toUpperCase()} · ${esc(p.groupName)}${p.sub?' · '+esc(p.sub):''}</span><span class="nm" data-open="${p.id}">${esc(p.name)}</span><span class="dc">${esc(desc(p))}</span><div class="ft">${(fKind==='doc'?[]:p.kho).map(k=>`<span class="tag">${k}</span>`).join('')}${p.textEn?'<span class="tag">VI · EN</span>':''}<button class="btn sm" data-open="${p.id}">Xem và dùng</button>${p.kind==='video'?`<button class="btn sm o" data-sb="${p.id}">+ Storyboard</button>`:''}<button class="fav${FAV.has(p.id)?' on':''}" data-fav="${p.id}" title="Đánh dấu">★</button></div></div></div>`).join(''):`<div class="empty">Không có mẫu khớp bộ lọc.</div>`;
+ if(fNew)L.sort((a,b)=>ngayN(b)-ngayN(a));
+ $('#grid').innerHTML=L.length?L.map(p=>`<div class="card">${demo(p.demo)}<div class="bd"><span class="id">${p.id.toUpperCase()} · ${esc(p.groupName)}${p.sub?' · '+esc(p.sub):''}</span>${p.ngay?`<span class="ng">Ngày tạo ${esc(p.ngay)}${isNew(p)?' <em>Mới</em>':''}</span>`:''}<span class="nm" data-open="${p.id}">${esc(p.name)}</span><span class="dc">${esc(desc(p))}</span><div class="ft">${(fKind==='doc'?[]:p.kho).map(k=>`<span class="tag">${k}</span>`).join('')}${p.textEn?'<span class="tag">VI · EN</span>':''}<button class="btn sm" data-open="${p.id}">Xem và dùng</button>${p.kind==='video'?`<button class="btn sm o" data-sb="${p.id}">+ Storyboard</button>`:''}<button class="fav${FAV.has(p.id)?' on':''}" data-fav="${p.id}" title="Đánh dấu">★</button></div></div></div>`).join(''):`<div class="empty">Không có mẫu khớp bộ lọc.</div>`;
  watch($('#grid'))}
 $('#grid').onclick=e=>{const o=e.target.closest('[data-open]'),s=e.target.closest('[data-sb]'),f=e.target.closest('[data-fav]');
  if(o)openP(o.dataset.open);else if(s){addScene(s.dataset.sb);toast('Đã thêm vào storyboard')}else if(f){const id=f.dataset.fav;FAV.has(id)?FAV.delete(id):FAV.add(id);LS.set('tvp_fav',[...FAV]);f.classList.toggle('on')}};
@@ -987,6 +993,7 @@ function openP(id,lang){const p=byId[id];if(!p)return;cur=p;mLang=lang||(p.origE
   ${p.dungcho?`<b>Dùng cho</b><p>${esc(p.dungcho)}</p>`:''}
   ${p.bangoc?`<b>Bản gốc (tóm tắt)</b><p>${esc(p.bangoc)}</p>`:''}
   ${p.duan.length?`<b>Dự án</b><p>${esc(p.duan.join(', '))}</p>`:''}
+  ${p.ngay?`<b>Ngày tạo</b><p>${esc(p.ngay)}</p>`:''}
   <b>Nguồn</b><p>${esc(p.nguon||'Prompt BVI tự viết, dùng tự do.')}${p.links.length?'<br>'+p.links.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//,'').slice(0,60))}</a>`).join('<br>'):''}</p>
   <b>Công cụ</b><p>${esc(p.tool)}</p></div>
   ${ph.length?`<div><b style="font-size:13.5px;color:var(--d)">${mLang==='en'?'Fill in the blanks':'Điền nội dung'} (${UQ.length})</b> <small style="color:var(--mut)">${mLang==='en'?'empty fields stay as [ ] in the prompt':'ô để trống sẽ giữ nguyên [ ] trong prompt'}</small><div class="ph" id="phs">${UQ.slice(0,6).map(i=>fieldHtml(ph[i],i)).join('')}</div>${UQ.length>6?`<details class="more"><summary>${mLang==='en'?'More fields':'Thêm ô'} (${UQ.length-6})</summary><div class="ph">${UQ.slice(6).map(i=>fieldHtml(ph[i],i)).join('')}</div></details>`:''}</div>`:''}
