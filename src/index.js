@@ -190,17 +190,17 @@ export default {
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) out.headers.set(k, v);
     return out;
   },
-  // Cron Trigger 0 0 * * * (UTC) = 7h00 sáng giờ Việt Nam: trợ lý đọc tin, lập kế hoạch tuần, soạn bài ngày mai để chờ duyệt.
-  // Cron 15,45 22,23 * * * (UTC) = 5h15 đến 6h45 sáng, 4 lượt: theo dõi đối thủ, lấy bài website và tin báo mới
-  // (miễn phí, chỉ đọc nguồn công khai). Mỗi lượt cập nhật một phần đối thủ chưa cập nhật trong 20 giờ, vì giới hạn số lượt gọi ra ngoài.
+  // Lịch tự chạy hằng ngày (Cron), không bao giờ tự đăng bài; chỉ đọc nguồn công khai.
   async scheduled(event, env, ctx) {
-    if (event.cron === '15,45 22,23 * * *') {
-      // Lượt 5h15 lấy video YouTube tham khảo; 3 lượt còn lại cập nhật đối thủ.
-      const d = new Date(event.scheduledTime);
-      if (d.getUTCHours() === 22 && d.getUTCMinutes() < 30) ctx.waitUntil(videos.runVideos(env).catch((e) => console.error('videos', e?.message)));
-      else ctx.waitUntil(competitors.runCompetitors(env, { staleHours: 20 }).catch((e) => console.error('competitors', e?.message)));
-      return;
-    }
-    ctx.waitUntil(assistant.runDaily(env).catch((e) => console.error('assistant', e?.message)));
+    // Gói miễn phí chỉ cho 5 lịch Cron cho cả tài khoản (dùng chung với các Worker khác),
+    // nên Worker này dùng đúng 1 lịch "0,15,45 0,22,23 * * *" (giờ UTC) và tự chia việc theo giờ:
+    // 7h00 VN: trợ lý AI; 5h15 VN: video YouTube tham khảo; 5h45, 6h15, 6h45 VN: cập nhật đối thủ.
+    const d = new Date(event.scheduledTime || Date.now());
+    const h = d.getUTCHours();
+    const m = d.getUTCMinutes();
+    const run = (name, p) => ctx.waitUntil(p.catch((e) => console.error(name, e?.message)));
+    if (h === 0 && m < 10) return run('assistant', assistant.runDaily(env));
+    if (h === 22 && m >= 10 && m < 30) return run('videos', videos.runVideos(env));
+    if ((h === 22 && m >= 40) || (h === 23 && m >= 10)) return run('competitors', competitors.runCompetitors(env, { staleHours: 20 }));
   },
 };
