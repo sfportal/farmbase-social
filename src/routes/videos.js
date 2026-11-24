@@ -4,7 +4,6 @@
 import { HttpError, json, readJson, now } from '../lib/http.js';
 import { requireRole } from '../lib/auth.js';
 import { audit } from '../lib/audit.js';
-import { generate, aiProvider, parseJson } from '../lib/ai.js';
 import { safeUrl } from './sources.js';
 import { mentions } from './competitors.js';
 
@@ -50,28 +49,7 @@ async function yt(env, path, params) {
   return data;
 }
 
-const IDEA_SYSTEM = `Bạn là chuyên viên nội dung video của FarmBase (giải pháp số hóa vùng trồng, nhật ký điện tử, truy xuất nguồn gốc do BVI và Salefronts đồng phát triển).
-Với mỗi video YouTube (tiêu đề, kênh, độ dài, mô tả), rút ra 1 đến 2 câu tiếng Việt: video làm hay ở điểm nào (cách mở, cấu trúc, hình thức) và FarmBase có thể học gì để làm video của mình.
-Không chép câu chữ của video; không viết FarmBase hay BVI "cấp mã"; không bịa số liệu. Video không liên quan nông nghiệp, truy xuất, bán hàng online thì ghi "Ít liên quan".
-Chỉ trả về JSON: {"items": [{"n": số thứ tự, "idea": "..."}]}`;
-
-async function addIdeas(env, rows) {
-  if (!rows.length || !aiProvider(env)) return 0;
-  const list = rows.map((r, i) => `[VIDEO ${i + 1}] ${r.kind === 'short' ? 'Shorts' : r.kind === 'reel' ? `Reels/TikTok (${r.platform})` : 'Clip'} ${r.duration_s ? `${Math.round(r.duration_s)} giây` : ''} · Kênh: ${r.channel}\nTiêu đề: ${r.title}\nMô tả: ${r.description.slice(0, 400)}`).join('\n\n');
-  try {
-    const res = await generate(env, { tier: 'fast', maxTokens: 6000, system: IDEA_SYSTEM, prompt: `[VIEC:video_idea]\n${list}\n\nTrả về JSON như hướng dẫn.` });
-    const j = parseJson(res.text);
-    let n = 0;
-    for (const it of j?.items || []) {
-      const row = rows[Number(it.n) - 1];
-      const idea = clean(it.idea, 500);
-      if (!row || !idea) continue;
-      await env.DB.prepare('UPDATE social_videos SET idea = ? WHERE id = ?').bind(idea, row.id).run();
-      n++;
-    }
-    return n;
-  } catch { return 0; }
-}
+// Không dùng AI viết ý tưởng cho video (theo yêu cầu Chủ hệ thống: tránh phát sinh phí Claude API).
 
 // Chỉ giữ video tiếng Việt: tiêu đề hoặc mô tả có chữ đặc trưng tiếng Việt (ă, â, đ, ê, ô, ơ, ư và dấu thanh),
 // hoặc YouTube ghi ngôn ngữ âm thanh là tiếng Việt.
@@ -159,7 +137,7 @@ export async function runVideos(env, { userId = null } = {}) {
     await env.DB.prepare(`UPDATE social_videos SET hidden = 1 WHERE id IN (${part.map(() => '?').join(',')})`).bind(...part).run();
   }
   if (hideIds.length) log.push(`Ẩn ${hideIds.length} video cũ không phải tiếng Việt`);
-  const ideas = await addIdeas(env, added.slice(0, 30));
+  const ideas = 0;
   await putSetting(env, 'video_last_run', { at: t, added: added.length, ideas, log }, userId);
   return { total: added.length, ideas, log };
 }
@@ -279,7 +257,7 @@ export async function addVideo(request, env, user) {
   const r = await env.DB.prepare(`INSERT INTO social_videos (platform, kind, video_id, url, title, channel, description, thumb, published_at, duration_s, views, keyword, competitor_id, note, source, created_by, first_seen_at, last_seen_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 'manual', ?, ?, ?) RETURNING id`)
     .bind(row.platform, row.kind, row.video_id, row.url, row.title, row.channel, row.description, row.thumb, row.published_at, row.duration_s, row.views, compId, note, user.id, t, t).first();
-  const ideas = (row.description || row.platform === 'youtube') ? await addIdeas(env, [{ ...row, id: r.id }]) : 0;
+  const ideas = 0;
   await audit(env, request, user.id, 'video_added', row.url.slice(0, 200), { id: r.id });
   return json({ id: r.id, updated: false, kind: row.kind, ai: ideas > 0 }, 201);
 }
