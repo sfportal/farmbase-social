@@ -100,6 +100,20 @@ const fakeGraph = createServer(async (req, res) => {
   if (u.pathname === '/feed.xml') { res.setHeader('content-type', 'application/rss+xml'); return res.end(`<?xml version="1.0"?><rss version="2.0"><channel><title>Tin Nông Nghiệp Thử</title>
     <item><title>Kỹ thuật bón phân sầu riêng mùa mưa</title><link>http://localhost:8791/bai/1</link><pubDate>Thu, 19 Nov 2026 08:00:00 +0700</pubDate><description><![CDATA[<img src="${BASE}/icons/icon.svg"><p>Bà con cần chia nhỏ lượng phân &amp; bón theo tán.</p>]]></description></item>
     <item><title>Giá cà phê tuần này</title><link>http://localhost:8791/bai/2</link><pubDate>Wed, 18 Nov 2026 08:00:00 +0700</pubDate><description>Giá cà phê tăng nhẹ.</description></item></channel></rss>`); }
+  if (u.pathname === '/youtube/v3/search') {
+    res.setHeader('content-type', 'application/json');
+    if (u.searchParams.get('key') !== 'khoa-thu') { res.statusCode = 403; return res.end(JSON.stringify({ error: { errors: [{ reason: 'forbidden' }] } })); }
+    const q = u.searchParams.get('q');
+    const ids = q === 'mã số vùng trồng' ? ['vid_clip1', 'vid_short1'] : q === 'FarmBase' ? ['vid_short1', 'vid_clip2'] : [];
+    return res.end(JSON.stringify({ items: ids.map((id) => ({ id: { kind: 'youtube#video', videoId: id } })) }));
+  }
+  if (u.pathname === '/youtube/v3/videos') {
+    res.setHeader('content-type', 'application/json');
+    const D = { vid_clip1: ['PT4M13S', 'Quy trình xin mã số vùng trồng', 1200], vid_short1: ['PT45S', 'Mã số vùng trồng là gì?', 3400], vid_clip2: ['PT1H2M', 'Hội thảo truy xuất nguồn gốc', 90] };
+    const items = u.searchParams.get('id').split(',').filter((id) => D[id]).map((id) => ({ id, contentDetails: { duration: D[id][0] }, statistics: { viewCount: String(D[id][2]), likeCount: '5' },
+      snippet: { title: D[id][1], channelTitle: 'Kênh Thử', channelId: 'UC1', description: 'Mô tả video thử', publishedAt: new Date(Date.now() - 86400000).toISOString(), thumbnails: { medium: { url: `${BASE}/icons/icon.svg` } } } }));
+    return res.end(JSON.stringify({ items }));
+  }
   if (u.pathname === '/news/search') {
     res.setHeader('content-type', 'application/rss+xml');
     const q = u.searchParams.get('q');
@@ -977,6 +991,34 @@ step('lịch đăng: gửi duyệt, từ chối, duyệt đăng ảnh, chọn Tr
   r = await owner.req('/api/competitors');
   assert.equal(r.data.competitors.find((c) => c.id === cid).active, false);
   assert.ok(r.data.report, 'lưu bản tổng hợp');
+  // Video tham khảo YouTube: tách Clip, Shorts; không trùng; AI rút ý tưởng; từ khóa chỉ Quản lý sửa
+  r = await viewer.req('/api/videos/fetch', { method: 'POST' });
+  assert.equal(r.status, 403);
+  r = await owner.req('/api/videos/keywords', { method: 'PUT', body: { keywords: 'mã số vùng trồng, FarmBase' } });
+  assert.deepEqual(r.data.keywords, ['mã số vùng trồng', 'FarmBase']);
+  r = await owner.req('/api/videos/fetch', { method: 'POST' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.total, 3, r.data.log.join('\n'));
+  assert.equal(r.data.ideas, 3);
+  r = await owner.req('/api/videos/fetch', { method: 'POST' });
+  assert.equal(r.data.total, 0, 'không lưu trùng');
+  r = await viewer.req('/api/videos?kind=short');
+  assert.deepEqual(r.data.items.map((v) => v.url), ['https://www.youtube.com/shorts/vid_short1']);
+  assert.ok(r.data.items[0].idea && r.data.items[0].views === 3400);
+  r = await viewer.req('/api/videos?kind=clip&sort=views');
+  assert.deepEqual(r.data.items.map((v) => v.video_id), ['vid_clip1', 'vid_clip2']);
+  r = await viewer.req(`/api/videos/${r.data.items[0].id}`, { method: 'PATCH', body: { starred: true } });
+  assert.equal(r.status, 200);
+  r = await viewer.req('/api/videos?starred=1');
+  assert.equal(r.data.items.length, 1);
+  r = await viewer.req('/api/videos', { method: 'POST', body: { url: 'https://www.tiktok.com/@doithu/video/7312345678901234567?lang=vi', competitor_id: cid, note: 'TikTok 20 giây hỏi đáp mã vùng trồng' } });
+  assert.equal(r.status, 201, JSON.stringify(r.data)); assert.equal(r.data.kind, 'reel'); assert.equal(r.data.ai, true);
+  r = await viewer.req('/api/videos', { method: 'POST', body: { url: 'https://www.tiktok.com/@doithu/video/7312345678901234567' } });
+  assert.equal(r.data.updated, true, 'không lưu trùng');
+  r = await viewer.req('/api/videos', { method: 'POST', body: { url: 'https://example.com/video' } });
+  assert.equal(r.status, 400);
+  r = await viewer.req(`/api/videos?kind=reel&competitor=${cid}`);
+  assert.equal(r.data.items.length, 1); assert.equal(r.data.items[0].url, 'https://www.tiktok.com/@doithu/video/7312345678901234567');
   step('theo dõi đối thủ: 11 đối thủ có sẵn, link Ad Library, dán link không trùng, AI phân tích, tự lấy website và tin báo, tổng hợp, đúng quyền');
 }
 
@@ -1001,9 +1043,9 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.fill('#password', NEW_ADMIN_PW);
   await page.click('button.btn');
   await page.waitForSelector('.stat');
-  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'doi-thu', 'chu-de', 'tro-ly', 'kho-media', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
+  for (const route of ['tong-quan', 'hop-thu', 'lich-dang', 'quy-dinh', 'fanpage', 'bai-dang', 'bao-cao', 'quang-cao', 'nguon-noi-dung', 'video-tham-khao', 'doi-thu', 'chu-de', 'tro-ly', 'kho-media', 'nhan-vien', 'nhat-ky', 'tai-khoan']) {
     await page.goto(`${BASE}/#/${route}`);
-    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung', 'doi-thu', 'chu-de', 'tro-ly', 'kho-media'].includes(route) ? 1200 : 500);
+    await page.waitForTimeout(['bai-dang', 'lich-dang', 'quang-cao', 'bao-cao', 'nguon-noi-dung', 'video-tham-khao', 'doi-thu', 'chu-de', 'tro-ly', 'kho-media'].includes(route) ? 1200 : 500);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 1, `${label} ${route}: tràn ngang ${overflow}px`);
     await page.screenshot({ path: `test-output/${label}-${route}.png`, fullPage: true });
@@ -1061,6 +1103,20 @@ for (const [label, viewport] of [['may-tinh', { width: 1366, height: 860 }], ['d
   await page.waitForSelector('#armsg');
   await page.screenshot({ path: `test-output/${label}-tu-tra-loi.png` });
   await page.keyboard.press('Escape');
+  if (label === 'may-tinh') {
+    // Form Nhân viên: tích Fanpage rồi lưu phải lưu đúng id Trang
+    const ed = (await owner.req('/api/users')).data.users.find((u) => u.email === 'bientap@example.test');
+    await page.goto(`${BASE}/#/nhan-vien`);
+    await page.click(`[data-edit="${ed.id}"]`);
+    await page.check('[data-pg][value="111"]');
+    await page.click('#uf button.btn:not(.ghost)');
+    await page.waitForSelector('#uf', { state: 'detached' });
+    const after = (await owner.req('/api/users')).data.users.find((u) => u.id === ed.id);
+    assert.deepEqual([...after.page_ids].sort(), ['111', '222'], 'form Nhân viên lưu đúng Fanpage được giao');
+    await owner.req(`/api/users/${ed.id}`, { method: 'PATCH', body: { page_ids: ['222'] } });
+    await page.goto(`${BASE}/#/fanpage`);
+    await page.waitForSelector('[data-staff="111"]');
+  }
   await page.click('[data-staff="111"]');
   await page.waitForSelector('[data-uid]');
   await page.screenshot({ path: `test-output/${label}-giao-nhan-vien.png` });

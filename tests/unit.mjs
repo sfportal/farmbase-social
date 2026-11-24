@@ -126,6 +126,15 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
   assert.ok(adLibraryUrl({ name: 'Hợp Trí', keywords: '' }).includes(`q=${encodeURIComponent('Hợp Trí')}`));
   assert.equal(mentions({ title: 'Qcert ra mắt dịch vụ', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), true);
   assert.equal(mentions({ title: 'Giá sầu riêng hôm nay', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), false);
+  const { isoSeconds, kindOf } = await import('../src/routes/videos.js');
+  assert.equal(isoSeconds('PT1H2M3S'), 3723); assert.equal(isoSeconds('PT45S'), 45); assert.equal(isoSeconds('P1D'), 86400);
+  assert.equal(kindOf(45), 'short'); assert.equal(kindOf(180), 'short'); assert.equal(kindOf(181), 'clip'); assert.equal(kindOf(null), 'clip');
+  const { parseVideoLink } = await import('../src/routes/videos.js');
+  assert.deepEqual(parseVideoLink('https://youtu.be/abcDEF12345?si=x'), { platform: 'youtube', kind: 'clip', video_id: 'abcDEF12345', url: 'https://www.youtube.com/watch?v=abcDEF12345' });
+  assert.equal(parseVideoLink('https://www.youtube.com/shorts/GVYsVAHi3jc').kind, 'short');
+  assert.equal(parseVideoLink('https://m.facebook.com/reel/123456789/?s=1').url, 'https://www.facebook.com/reel/123456789');
+  assert.equal(parseVideoLink('https://www.instagram.com/reel/Cxyz12/').platform, 'instagram');
+  assert.throws(() => parseVideoLink('https://www.youtube.com/'));
   const { fetchCost } = await import('../src/routes/competitors.js');
   const T = 2_000_000_000;
   assert.equal(fetchCost({ keywords: 'X', website: 'https://a.vn', feed_url: 'https://a.vn/feed' }, T), 2);
