@@ -114,6 +114,7 @@ const I = {
   ai: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 3l.6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6z"/>',
   post: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 13h6M7 16h10"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  spy: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4M8 11h6M11 8v6"/>',
   media: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/>',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[k]}</svg>`;
@@ -131,6 +132,7 @@ function navItems() {
     { r: 'thu-vien-prompt', href: '/prompt/', label: 'Thư viện prompt', ic: 'lib', sec: 'Nội dung' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'post', sec: 'Hiệu quả' },
     { r: 'bao-cao', label: 'Báo cáo', ic: 'report', sec: 'Hiệu quả' },
+    ...(staff ? [{ r: 'doi-thu', label: 'Theo dõi đối thủ', ic: 'spy', sec: 'Hiệu quả' }] : []),
     ...(mgr ? [{ r: 'quang-cao', label: 'Quảng cáo', ic: 'ads', sec: 'Hiệu quả' }] : []),
     { r: 'fanpage', label: 'Fanpage', ic: 'pages', sec: 'Quản trị' },
     { r: 'quy-dinh', label: 'Quy định đăng bài', ic: 'rule', sec: 'Quản trị' },
@@ -419,6 +421,124 @@ function openPageStaff(pageId, pageName) {
         }
         toast('Đã lưu nhân viên được giao'); close(); viewPages(new URLSearchParams());
       } catch (e) { m.querySelector('#psmsg').innerHTML = `<div class="alert err">${esc(e.message)}</div>`; save.disabled = false; }
+    };
+  });
+}
+
+// ---------- Theo dõi đối thủ ----------
+const cmpState = { comp: '', kind: '', days: 30 };
+const CMP_KIND_CLS = { ad: 'warn', post: '', article: 'off', news: 'off' };
+
+async function viewCompetitors() {
+  layout('doi-thu', 'Theo dõi đối thủ', 'Quảng cáo, bài đăng, bài website và tin báo của đối thủ, mỗi mục có đường dẫn chi tiết', '<div class="muted">Đang tải…</div>', '');
+  const qs = new URLSearchParams({ days: String(cmpState.days) });
+  if (cmpState.comp) qs.set('competitor_id', cmpState.comp);
+  if (cmpState.kind) qs.set('kind', cmpState.kind);
+  const d = await api(`/api/competitors?${qs}`);
+  const v = document.getElementById('view');
+  const edit = d.can_edit;
+  document.querySelector('.top .row').innerHTML = edit ? '<button class="btn ghost" id="cfetch">Cập nhật ngay</button><button class="btn" id="cadd">Thêm đối thủ</button>' : '';
+  const byId = Object.fromEntries(d.competitors.map((c) => [c.id, c]));
+  const opts = d.competitors.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const new7 = d.competitors.reduce((n, c) => n + (c.counts.new7 || 0), 0);
+  const rep = d.report;
+  const reportHtml = `<div class="card"><div class="row"><h2 class="grow" style="margin:0">AI tổng hợp đối thủ</h2>${edit && d.has_ai ? '<select id="cdays" class="sm"><option value="7">7 ngày</option><option value="14" selected>14 ngày</option><option value="30">30 ngày</option></select><button class="btn ghost sm" id="cana">Tổng hợp</button>' : ''}</div>
+    ${rep ? `<div class="muted small">Lúc ${fmtTime(rep.at)} · ${rep.days} ngày · ${rep.count} mục</div><p>${esc(rep.summary)}</p>
+      ${rep.themes.length ? `<div class="small"><b>Chủ đề nổi bật:</b> ${rep.themes.map(esc).join(' · ')}</div>` : ''}
+      ${rep.offers.length ? `<div class="small"><b>Ưu đãi, lời kêu gọi:</b> ${rep.offers.map(esc).join(' · ')}</div>` : ''}
+      ${rep.ideas.length ? `<div class="small" style="margin-top:8px"><b>Ý tưởng cho FarmBase:</b><ul style="margin:4px 0 0;padding-left:20px">${rep.ideas.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}`
+      : `<p class="muted small" style="margin-bottom:0">${d.has_ai ? 'Chưa có bản tổng hợp. Dán link quảng cáo, bài của đối thủ rồi bấm "Tổng hợp".' : 'Chưa bật AI cho hệ thống.'}</p>`}</div>`;
+  const pasteHtml = `<div class="card"><h2>Dán link quảng cáo hoặc bài của đối thủ</h2>
+    <div class="cmpform"><div><label for="cpc">Đối thủ</label><select id="cpc">${opts}</select></div>
+      <div class="grow"><label for="cpu">Link</label><input id="cpu" type="url" placeholder="https://www.facebook.com/ads/library/?id=… hoặc link bài Fanpage, bài website"></div></div>
+    <label for="cpt">Nội dung (không bắt buộc, dán chữ của quảng cáo hoặc bài để AI phân tích góc tiếp cận, lời kêu gọi)</label><textarea id="cpt" rows="3" maxlength="8000"></textarea>
+    <div class="row"><label for="cps" class="grow">Ngày bắt đầu chạy (nếu có)</label><input id="cps" type="date"><button class="btn" id="cpgo">Lưu</button></div>
+    <div class="muted small">Cách lấy link mẫu quảng cáo: bấm "Ad Library" ở đối thủ, chọn mẫu quảng cáo, bấm "Xem chi tiết mẫu quảng cáo", sao chép link có dạng ...ads/library/?id=… Hệ thống lưu theo ngày và không lưu trùng.</div><div id="cpmsg"></div></div>`;
+  const itemsHtml = d.items.length ? d.items.map((i) => {
+    const c = byId[i.competitor_id];
+    return `<div class="list-item cmpitem"><div class="grow">
+      <div><span class="badge ${CMP_KIND_CLS[i.kind] || ''}">${esc(d.kinds[i.kind] || i.kind)}</span> <b>${esc(i.competitor_name)}</b> <span class="muted small">· ghi nhận ${fmtTime(i.first_seen_at)}${i.started_at ? ` · ${i.kind === 'ad' ? 'chạy từ' : 'đăng'} ${fmtDate(i.started_at * 1000)}` : ''}${i.source === 'auto' ? ' · tự lấy' : ''}</span></div>
+      <div class="ctitle">${esc(i.title)}</div>
+      ${i.angle ? `<div class="small"><b>Góc tiếp cận:</b> ${esc(i.angle)}</div>` : i.body ? `<div class="small muted">${esc(i.body.slice(0, 280))}${i.body.length > 280 ? '…' : ''}</div>` : ''}
+      ${i.fmt || i.cta ? `<div class="small muted">${i.fmt ? `Định dạng: ${esc(i.fmt)}` : ''}${i.fmt && i.cta ? ' · ' : ''}${i.cta ? `Kêu gọi: ${esc(i.cta)}` : ''}</div>` : ''}</div>
+      <div class="row">${i.url ? `<a class="btn ghost sm" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">Xem chi tiết ↗</a>` : ''}${edit ? `<button class="btn ghost sm danger" data-cidel="${i.id}">Xóa</button>` : ''}</div></div>`;
+  }).join('') : '<p class="muted" style="margin:0">Chưa có mục nào trong khoảng thời gian này.</p>';
+  const compsHtml = d.competitors.map((c) => `<div class="list-item"><div class="grow">
+      <div class="ellipsis"><b>${esc(c.name)}</b>${c.active ? '' : ' <span class="badge off">Tạm dừng</span>'}${c.counts.new7 ? ` <span class="badge">${c.counts.new7} mới 7 ngày</span>` : ''}</div>
+      <div class="muted small">${esc(c.kind || '')}</div>
+      <div class="muted small">${c.counts.ad} quảng cáo · ${c.counts.post} bài Fanpage · ${c.counts.article} bài website · ${c.counts.news} tin báo${c.last_fetch_at ? ` · tự lấy lúc ${fmtTime(c.last_fetch_at)}` : ''}${c.last_error ? ` · <span class="err-t">${esc(c.last_error)}</span>` : ''}</div>
+      ${c.note ? `<details class="small"><summary>Ghi chú</summary>${esc(c.note)}</details>` : ''}</div>
+    <div class="row"><a class="btn sm" href="${esc(c.ad_library_url)}" target="_blank" rel="noopener noreferrer">Ad Library ↗</a>${c.fb_url ? `<a class="btn ghost sm" href="${esc(c.fb_url)}" target="_blank" rel="noopener noreferrer">Fanpage ↗</a>` : ''}${c.website ? `<a class="btn ghost sm" href="${esc(c.website)}" target="_blank" rel="noopener noreferrer">Website ↗</a>` : ''}${edit ? `<button class="btn ghost sm" data-cedit="${c.id}">Sửa</button>` : ''}${me.role === 'owner' ? `<button class="btn ghost sm danger" data-cdel="${c.id}">Xóa</button>` : ''}</div></div>`).join('');
+  v.innerHTML = `<div class="cmpstat">
+      <div class="card stat"><span class="n">${d.competitors.filter((c) => c.active).length}</span><span class="muted small">đối thủ đang theo dõi</span></div>
+      <div class="card stat"><span class="n">${new7}</span><span class="muted small">mục mới 7 ngày qua</span></div></div>
+    ${reportHtml}${pasteHtml}
+    <div class="card filters"><div><label for="cfc">Đối thủ</label><select id="cfc"><option value="">Tất cả</option>${opts}</select></div>
+      <div><label for="cfk">Loại</label><select id="cfk"><option value="">Tất cả</option>${Object.entries(d.kinds).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
+      <div><label for="cfd">Thời gian</label><select id="cfd"><option value="7">7 ngày</option><option value="30">30 ngày</option><option value="90">90 ngày</option></select></div></div>
+    <div class="card">${itemsHtml}</div>
+    <h2 class="sec">Danh sách đối thủ</h2><div class="card">${compsHtml || '<p class="muted" style="margin:0">Chưa có đối thủ nào.</p>'}</div>
+    <p class="muted small">Meta không có API cho quảng cáo thương mại tại Việt Nam và không cho đọc bài của Trang mình không quản lý, nên quảng cáo và bài Fanpage của đối thủ được lưu bằng cách dán link. Mỗi sáng 6h30, hệ thống tự lấy bài mới trên website đối thủ (nếu website có RSS) và tin báo nhắc tới tên đối thủ.</p>`;
+  v.querySelector('#cfc').value = cmpState.comp; v.querySelector('#cfk').value = cmpState.kind; v.querySelector('#cfd').value = String(cmpState.days);
+  if (cmpState.comp) v.querySelector('#cpc').value = cmpState.comp;
+  v.querySelector('#cfc').onchange = (e) => { cmpState.comp = e.target.value; viewCompetitors(); };
+  v.querySelector('#cfk').onchange = (e) => { cmpState.kind = e.target.value; viewCompetitors(); };
+  v.querySelector('#cfd').onchange = (e) => { cmpState.days = Number(e.target.value); viewCompetitors(); };
+  v.querySelector('#cpgo').onclick = async (e) => {
+    const msg = v.querySelector('#cpmsg');
+    const url = v.querySelector('#cpu').value.trim();
+    if (!url) { msg.innerHTML = '<div class="alert err">Vui lòng dán link.</div>'; return; }
+    e.target.disabled = true; msg.innerHTML = `<div class="muted small">${v.querySelector('#cpt').value.trim() && d.has_ai ? 'Đang lưu và cho AI phân tích…' : 'Đang lưu…'}</div>`;
+    try {
+      const r = await api(`/api/competitors/${v.querySelector('#cpc').value}/items`, { method: 'POST', body: { url, text: v.querySelector('#cpt').value, started: v.querySelector('#cps').value } });
+      toast(r.updated ? 'Mục này đã có, đã cập nhật ngày ghi nhận' : `Đã lưu ${d.kinds[r.kind].toLowerCase()}${r.ai ? ', AI đã phân tích' : ''}`);
+      viewCompetitors();
+    } catch (err) { msg.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
+  };
+  v.querySelector('#cana')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang tổng hợp…';
+    try { await api('/api/competitors/analyze', { method: 'POST', body: { days: Number(v.querySelector('#cdays').value) } }); toast('Đã tổng hợp'); viewCompetitors(); }
+    catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Tổng hợp'; }
+  });
+  document.getElementById('cfetch')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang cập nhật…';
+    try { const r = await api('/api/competitors/fetch', { method: 'POST', body: {} }); toast(`Đã cập nhật: ${r.total} mục mới`); viewCompetitors(); }
+    catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Cập nhật ngay'; }
+  });
+  document.getElementById('cadd')?.addEventListener('click', () => openCompetitor(null));
+  v.querySelectorAll('[data-cedit]').forEach((b) => (b.onclick = () => openCompetitor(byId[b.dataset.cedit])));
+  v.querySelectorAll('[data-cdel]').forEach((b) => (b.onclick = async () => {
+    const c = byId[b.dataset.cdel];
+    if (!(await confirmBox('Xóa đối thủ?', `Xóa "${c.name}" cùng toàn bộ mục đã ghi nhận. Không khôi phục được. Muốn tạm ngừng theo dõi thì bấm Sửa và bỏ chọn "Đang theo dõi".`, 'Xóa', true))) return;
+    try { await api(`/api/competitors/${c.id}`, { method: 'DELETE' }); toast('Đã xóa'); if (cmpState.comp === String(c.id)) cmpState.comp = ''; viewCompetitors(); } catch (e) { toast(e.message); }
+  }));
+  v.querySelectorAll('[data-cidel]').forEach((b) => (b.onclick = async () => {
+    if (!(await confirmBox('Xóa mục này?', 'Mục ghi nhận sẽ bị xóa khỏi hệ thống, không khôi phục được.', 'Xóa', true))) return;
+    try { await api(`/api/competitors/items/${b.dataset.cidel}`, { method: 'DELETE' }); toast('Đã xóa'); viewCompetitors(); } catch (e) { toast(e.message); }
+  }));
+}
+
+function openCompetitor(c) {
+  modal(`<h2>${c ? 'Sửa đối thủ' : 'Thêm đối thủ'}</h2><form id="cf" novalidate>
+    <label for="cn">Tên</label><input id="cn" maxlength="120" value="${esc(c?.name || '')}">
+    <label for="ck">Lĩnh vực</label><input id="ck" maxlength="200" value="${esc(c?.kind || '')}" placeholder="Ví dụ: Phần mềm truy xuất nguồn gốc">
+    <label for="cfb">Link Fanpage</label><input id="cfb" type="url" value="${esc(c?.fb_url || '')}" placeholder="https://www.facebook.com/…">
+    <label for="cpid">Mã Trang (Page ID, không bắt buộc)</label><input id="cpid" inputmode="numeric" value="${esc(c?.fb_page_id || '')}">
+    <div class="muted small">Có mã Trang thì nút Ad Library mở đúng danh sách quảng cáo của Trang đó. Mã Trang xem ở mục "Giới thiệu, Minh bạch về Trang" trên Fanpage, hoặc trong link Ad Library (view_all_page_id=…).</div>
+    <label for="ckw">Từ khóa tìm quảng cáo, tin báo</label><input id="ckw" maxlength="100" value="${esc(c?.keywords || '')}" placeholder="Mặc định là tên đối thủ">
+    <label for="cweb">Website (tự lấy bài mới nếu có RSS)</label><input id="cweb" type="url" value="${esc(c?.website || '')}" placeholder="https://…">
+    <label for="cnote">Ghi chú</label><textarea id="cnote" rows="3" maxlength="2000">${esc(c?.note || '')}</textarea>
+    ${c ? `<label class="check"><input type="checkbox" id="cact" ${c.active ? 'checked' : ''}> Đang theo dõi</label>` : ''}
+    <div id="cfmsg"></div>
+    <div class="actions"><button type="button" class="btn ghost" data-close>Hủy</button><button type="button" class="btn" id="cfgo">${c ? 'Lưu' : 'Thêm'}</button></div></form>`, (m, close) => {
+    m.querySelector('[data-close]').onclick = close;
+    m.querySelector('#cfgo').onclick = async (e) => {
+      const body = { name: m.querySelector('#cn').value, kind: m.querySelector('#ck').value, fb_url: m.querySelector('#cfb').value, fb_page_id: m.querySelector('#cpid').value.trim(),
+        keywords: m.querySelector('#ckw').value, website: m.querySelector('#cweb').value, note: m.querySelector('#cnote').value };
+      if (c) body.active = m.querySelector('#cact').checked;
+      e.target.disabled = true;
+      try { await api(c ? `/api/competitors/${c.id}` : '/api/competitors', { method: c ? 'PATCH' : 'POST', body }); toast(c ? 'Đã lưu' : 'Đã thêm đối thủ'); close(); viewCompetitors(); }
+      catch (err) { m.querySelector('#cfmsg').innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
     };
   });
 }
@@ -1681,7 +1801,7 @@ const ACTIONS = {
   user_created: 'Tạo tài khoản', user_updated: 'Sửa tài khoản', user_unlocked: 'Mở khóa tài khoản',
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
-  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
+  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', competitor_added: 'Thêm đối thủ', competitor_updated: 'Sửa đối thủ', competitor_removed: 'Xóa đối thủ', competitor_item_added: 'Lưu quảng cáo, bài đối thủ', competitor_item_removed: 'Xóa mục đối thủ', competitors_fetched: 'Cập nhật dữ liệu đối thủ', competitor_report: 'AI tổng hợp đối thủ', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
   media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', prompt_accepted: 'Thêm prompt bổ sung', prompt_dismissed: 'Bỏ qua prompt đề xuất', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   topics_seeded: 'Nạp bộ chủ đề mẫu', topics_replaced: 'Thay bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
@@ -2315,6 +2435,7 @@ async function render() {
       case 'fanpage': return await viewPages(q);
       case 'bai-dang': return await viewPosts(q);
       case 'bao-cao': return await viewReport();
+      case 'doi-thu': return me.role !== 'agent' ? await viewCompetitors() : go('tong-quan');
       case 'nguon-noi-dung': return await viewSources();
       case 'chu-de': return me.role !== 'agent' ? await viewTopics(q) : go('tong-quan');
       case 'tro-ly': return me.role !== 'agent' ? await viewAssistant() : go('tong-quan');

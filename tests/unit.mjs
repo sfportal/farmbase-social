@@ -114,4 +114,17 @@ assert.equal(enforceStyle('Chào bà con.\n\nDakLak FarmBase', { strip: true }),
     if (c.storyboard_id) assert.ok(sbs.has(c.storyboard_id), `storyboard ${c.storyboard_id} có trong thư viện`);
   }
 }
+// Theo dõi đối thủ: nhận diện link, link Ad Library, lọc tin nhắc tên đối thủ
+{
+  const { parseLink, adLibraryUrl, mentions } = await import('../src/routes/competitors.js');
+  assert.deepEqual(parseLink('https://www.facebook.com/ads/library/?id=1131153172655563&ref=x'), { kind: 'ad', ext_id: '1131153172655563', url: 'https://www.facebook.com/ads/library/?id=1131153172655563' });
+  assert.equal(parseLink('https://web.facebook.com/qcert.vn/posts/pfbid02x?__tn__=R').url, 'https://www.facebook.com/qcert.vn/posts/pfbid02x');
+  assert.equal(parseLink('https://www.facebook.com/permalink.php?story_fbid=123&id=456&ref=a').url, 'https://www.facebook.com/permalink.php?story_fbid=123&id=456');
+  assert.deepEqual(parseLink('https://btrace.vn/tin-tuc/bai-1?utm_source=fb').url, 'https://btrace.vn/tin-tuc/bai-1');
+  assert.throws(() => parseLink('https://www.facebook.com/ads/library/?q=abc'));
+  assert.ok(adLibraryUrl({ fb_page_id: '123456', name: 'X' }).endsWith('view_all_page_id=123456'));
+  assert.ok(adLibraryUrl({ name: 'Hợp Trí', keywords: '' }).includes(`q=${encodeURIComponent('Hợp Trí')}`));
+  assert.equal(mentions({ title: 'Qcert ra mắt dịch vụ', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), true);
+  assert.equal(mentions({ title: 'Giá sầu riêng hôm nay', summary: '' }, { name: 'Qcert', keywords: 'Qcert' }), false);
+}
 console.log('unit: đạt');
