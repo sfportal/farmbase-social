@@ -24,6 +24,8 @@
     "AI_FAKE_JSON": "1",
     "SOURCES_ALLOW_LOCAL": "1",
     "NEWS_SEARCH_BASE": "http://localhost:8791",
-    "FB_GRAPH_BASE": "http://localhost:8791"
+    "FB_GRAPH_BASE": "http://localhost:8791",
+    "YOUTUBE_API_KEY": "khoa-thu",
+    "YOUTUBE_API_BASE": "http://localhost:8791"
   }
 }

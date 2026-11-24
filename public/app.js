@@ -114,6 +114,7 @@ const I = {
   ai: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8zM5 3l.6 1.4L7 5l-1.4.6L5 7l-.6-1.4L3 5l1.4-.6z"/>',
   post: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 13h6M7 16h10"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  play: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/>',
   spy: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4M8 11h6M11 8v6"/>',
   media: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/>',
 };
@@ -128,7 +129,7 @@ function navItems() {
     { r: 'tong-quan', label: 'Tổng quan', ic: 'home', sec: '' },
     { r: 'hop-thu', label: 'Hộp thư', ic: 'inbox', sec: '' },
     { r: 'lich-dang', label: 'Lịch đăng', ic: 'cal', sec: '' },
-    ...(staff ? [{ r: 'tro-ly', label: 'Trợ lý AI', ic: 'ai', sec: 'Nội dung' }, { r: 'chu-de', label: 'Chủ đề nội dung', ic: 'topic', sec: 'Nội dung' }, { r: 'kho-media', label: 'Kho ảnh, video', ic: 'media', sec: 'Nội dung' }, { r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src', sec: 'Nội dung' }] : []),
+    ...(staff ? [{ r: 'tro-ly', label: 'Trợ lý AI', ic: 'ai', sec: 'Nội dung' }, { r: 'chu-de', label: 'Chủ đề nội dung', ic: 'topic', sec: 'Nội dung' }, { r: 'kho-media', label: 'Kho ảnh, video', ic: 'media', sec: 'Nội dung' }, { r: 'nguon-noi-dung', label: 'Nguồn nội dung', ic: 'src', sec: 'Nội dung' }, { r: 'video-tham-khao', label: 'Video tham khảo', ic: 'play', sec: 'Nội dung' }] : []),
     { r: 'thu-vien-prompt', href: '/prompt/', label: 'Thư viện prompt', ic: 'lib', sec: 'Nội dung' },
     { r: 'bai-dang', label: 'Bài đăng', ic: 'post', sec: 'Hiệu quả' },
     { r: 'bao-cao', label: 'Báo cáo', ic: 'report', sec: 'Hiệu quả' },
@@ -422,6 +423,82 @@ function openPageStaff(pageId, pageName) {
         toast('Đã lưu nhân viên được giao'); close(); viewPages(new URLSearchParams());
       } catch (e) { m.querySelector('#psmsg').innerHTML = `<div class="alert err">${esc(e.message)}</div>`; save.disabled = false; }
     };
+  });
+}
+
+// ---------- Video tham khảo (YouTube) ----------
+const vidState = { kind: 'short', sort: 'new', days: 14, keyword: '', starred: false, comp: '' };
+const PLAT = { youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram', tiktok: 'TikTok' };
+const fmtLen = (s) => (s === null || s === undefined ? '' : s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+
+async function viewVideos() {
+  layout('video-tham-khao', 'Video tham khảo', 'Video YouTube mới về FarmBase, mã vùng trồng, truy xuất, bán hàng online; AI rút ý tưởng để học hỏi', '<div class="muted">Đang tải…</div>', '');
+  const qs = new URLSearchParams({ kind: vidState.kind, sort: vidState.sort, days: String(vidState.days) });
+  if (vidState.keyword) qs.set('keyword', vidState.keyword);
+  if (vidState.starred) qs.set('starred', '1');
+  if (vidState.comp) qs.set('competitor', vidState.comp);
+  const d = await api(`/api/videos?${qs}`);
+  const v = document.getElementById('view');
+  document.querySelector('.top .row').innerHTML = d.can_edit && d.has_key ? '<button class="btn ghost" id="vfetch">Cập nhật ngay</button>' : '';
+  const setup = d.has_key ? '' : `<div class="alert warn">Chưa có khóa YouTube nên hệ thống chưa tự lấy video. ${me.role === 'owner' ? 'Quý khách tạo khóa YouTube Data API v3 (miễn phí) trong Google Cloud Console (APIs & Services, Credentials, Create API key; bật YouTube Data API v3), rồi thêm vào Cloudflare: Worker farmbase-social, Settings, Variables and Secrets, tên <code>YOUTUBE_API_KEY</code>. Không cần gửi khóa qua chat.' : 'Vui lòng nhờ Chủ hệ thống thêm khóa.'}</div>`;
+  const lr = d.last_run;
+  const cards = d.items.map((x) => `<div class="vcard ${x.kind}"><a class="vth ${x.thumb ? '' : `noimg ${esc(x.platform)}`}" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${x.thumb ? `<img src="${esc(x.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="vplat">${icon('play')}${esc(PLAT[x.platform] || x.platform)}</span>`}<span class="vdur">${x.kind === 'short' ? 'Shorts' : x.kind === 'reel' ? esc(PLAT[x.platform] || '') : ''} ${esc(fmtLen(x.duration_s))}</span></a>
+      <div class="vbody"><a class="vtitle" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>
+      <div class="muted small">${[x.channel ? esc(x.channel) : '', x.views !== null ? `${fmtNum(x.views)} lượt xem` : '', x.published_at ? fmtTime(x.published_at) : x.source === 'manual' ? `lưu ${fmtTime(x.first_seen_at)}` : ''].filter(Boolean).join(' · ')}</div>
+      ${x.note && x.note !== x.title ? `<div class="small muted">${esc(x.note.slice(0, 200))}</div>` : ''}
+      ${x.idea ? `<div class="small videa">${icon('ai')}<span>${esc(x.idea)}</span></div>` : ''}
+      <div class="row">${x.competitor_name ? `<span class="badge warn">${esc(x.competitor_name)}</span>` : x.keyword ? `<span class="badge off">${esc(x.keyword)}</span>` : ''}<span class="grow"></span><button class="btn ghost sm" data-vstar="${x.id}" data-on="${x.starred ? 1 : 0}">${x.starred ? '★ Đã lưu' : '☆ Lưu'}</button>${d.can_edit ? `<button class="btn ghost sm" data-vhide="${x.id}">Ẩn</button>` : ''}</div></div></div>`).join('');
+  v.innerHTML = `${setup}<div class="cmpstat">
+      <div class="card stat"><span class="n">${d.new7.short || 0}</span><span class="muted small">Shorts mới 7 ngày</span></div>
+      <div class="card stat"><span class="n">${d.new7.clip || 0}</span><span class="muted small">clip mới 7 ngày</span></div></div>
+    <div class="card filters"><div><label>Loại</label><div class="seg"><button data-vk="short" class="${vidState.kind === 'short' ? 'on' : ''}">Shorts</button><button data-vk="clip" class="${vidState.kind === 'clip' ? 'on' : ''}">Clip</button><button data-vk="reel" class="${vidState.kind === 'reel' ? 'on' : ''}">Reels, TikTok</button></div></div>
+      <div><label for="vcomp">Đối thủ</label><select id="vcomp"><option value="">Tất cả video</option><option value="any">Chỉ video của đối thủ</option>${d.competitors.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <div><label for="vkw">Từ khóa</label><select id="vkw"><option value="">Tất cả</option>${d.keywords.map((k) => `<option>${esc(k)}</option>`).join('')}</select></div>
+      <div><label for="vsort">Sắp xếp</label><select id="vsort"><option value="new">Mới lấy về</option><option value="views">Nhiều lượt xem</option></select></div>
+      <div><label for="vdays">Đăng trong</label><select id="vdays"><option value="7">7 ngày</option><option value="14">14 ngày</option><option value="30">30 ngày</option><option value="90">90 ngày</option></select></div>
+      <div class="end"><label class="check"><input type="checkbox" id="vstar" ${vidState.starred ? 'checked' : ''}> Chỉ video đã lưu</label></div></div>
+    <div class="card"><h2>Dán link video của đối thủ hoặc video hay</h2>
+      <div class="cmpform"><div class="grow"><label for="vurl">Link (Facebook Reels, Instagram Reels, TikTok, YouTube)</label><input id="vurl" type="url" placeholder="https://www.tiktok.com/@…/video/… hoặc https://www.facebook.com/reel/…"></div>
+        <div><label for="vvc">Đối thủ (không bắt buộc)</label><select id="vvc"><option value="">Không gắn</option>${d.competitors.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div></div>
+      <label for="vnote">Ghi chú hoặc nội dung video (để AI rút ý tưởng)</label><textarea id="vnote" rows="2" maxlength="3000" placeholder="Ví dụ: Reels 20 giây, mở bằng cảnh vườn, chữ to 'Mã vùng trồng là gì?'…"></textarea>
+      <div class="row"><span class="muted small grow">Reels và TikTok chưa có API mở nên lưu bằng cách dán link. YouTube tự lấy thêm tiêu đề, lượt xem.</span><button class="btn sm" id="vadd">Lưu video</button></div><div id="vmsg"></div></div>
+    ${cards ? `<div class="vgrid ${vidState.kind}">${cards}</div>` : `<div class="card muted">Chưa có video nào${d.has_key ? '. Bấm "Cập nhật ngay" hoặc chờ lượt tự lấy lúc 5h15 sáng.' : '.'}</div>`}
+    <div class="card"><h2>Từ khóa tìm video</h2>
+      ${d.can_edit ? `<textarea id="vkws" rows="3" maxlength="1200">${esc(d.keywords.join(', '))}</textarea><div class="row"><span class="muted small grow">Tối đa 12 từ khóa, cách nhau bằng dấu phẩy.</span><button class="btn sm" id="vkwsave">Lưu từ khóa</button></div>` : `<div>${d.keywords.map(esc).join(' · ')}</div>`}
+      <div class="muted small">Mỗi sáng 5h15 hệ thống tìm video YouTube đăng trong 14 ngày gần nhất theo các từ khóa này và theo tên từng đối thủ đang theo dõi, tách Shorts (dưới 3 phút) và clip, AI rút ý tưởng. Lần chạy gần nhất: ${lr ? `${fmtTime(lr.at)}, ${lr.added} video mới` : 'chưa chạy'}. TikTok và Reels chưa có API mở nên chưa tự lấy.</div>
+      ${lr?.log?.length ? `<details><summary class="small">Nhật ký lần chạy</summary>${lr.log.map((l) => `<div class="small">• ${esc(l)}</div>`).join('')}</details>` : ''}</div>`;
+  v.querySelector('#vcomp').value = vidState.comp;
+  v.querySelector('#vcomp').onchange = (e) => { vidState.comp = e.target.value; viewVideos(); };
+  v.querySelector('#vadd').onclick = async (e) => {
+    const msg = v.querySelector('#vmsg'); const url = v.querySelector('#vurl').value.trim();
+    if (!url) { msg.innerHTML = '<div class="alert err">Vui lòng dán link video.</div>'; return; }
+    e.target.disabled = true; msg.innerHTML = '<div class="muted small">Đang lưu…</div>';
+    try {
+      const r = await api('/api/videos', { method: 'POST', body: { url, competitor_id: v.querySelector('#vvc').value || null, note: v.querySelector('#vnote').value } });
+      toast(r.updated ? 'Video này đã có, đã cập nhật' : `Đã lưu video${r.ai ? ', AI đã rút ý tưởng' : ''}`);
+      if (!r.updated && r.kind) vidState.kind = r.kind;
+      viewVideos();
+    } catch (err) { msg.innerHTML = `<div class="alert err">${esc(err.message)}</div>`; e.target.disabled = false; }
+  };
+  v.querySelector('#vkw').value = vidState.keyword; v.querySelector('#vsort').value = vidState.sort; v.querySelector('#vdays').value = String(vidState.days);
+  v.querySelectorAll('[data-vk]').forEach((b) => (b.onclick = () => { vidState.kind = b.dataset.vk; viewVideos(); }));
+  v.querySelector('#vkw').onchange = (e) => { vidState.keyword = e.target.value; viewVideos(); };
+  v.querySelector('#vsort').onchange = (e) => { vidState.sort = e.target.value; viewVideos(); };
+  v.querySelector('#vdays').onchange = (e) => { vidState.days = Number(e.target.value); viewVideos(); };
+  v.querySelector('#vstar').onchange = (e) => { vidState.starred = e.target.checked; viewVideos(); };
+  v.querySelectorAll('[data-vstar]').forEach((b) => (b.onclick = async () => {
+    try { await api(`/api/videos/${b.dataset.vstar}`, { method: 'PATCH', body: { starred: b.dataset.on !== '1' } }); viewVideos(); } catch (e) { toast(e.message); }
+  }));
+  v.querySelectorAll('[data-vhide]').forEach((b) => (b.onclick = async () => {
+    try { await api(`/api/videos/${b.dataset.vhide}`, { method: 'PATCH', body: { hidden: true } }); toast('Đã ẩn video'); viewVideos(); } catch (e) { toast(e.message); }
+  }));
+  v.querySelector('#vkwsave')?.addEventListener('click', async () => {
+    try { await api('/api/videos/keywords', { method: 'PUT', body: { keywords: v.querySelector('#vkws').value } }); toast('Đã lưu từ khóa'); viewVideos(); } catch (e) { toast(e.message); }
+  });
+  document.getElementById('vfetch')?.addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Đang lấy video…';
+    try { const r = await api('/api/videos/fetch', { method: 'POST' }); toast(`Đã lấy ${r.total} video mới`); viewVideos(); }
+    catch (err) { toast(err.message); e.target.disabled = false; e.target.textContent = 'Cập nhật ngay'; }
   });
 }
 
@@ -1745,7 +1822,7 @@ async function viewUsers() {
       ${u ? `<label for="u-status">Trạng thái</label><select id="u-status"><option value="active" ${u.status === 'active' ? 'selected' : ''}>Đang hoạt động</option><option value="disabled" ${u.status === 'disabled' ? 'selected' : ''}>Vô hiệu hóa (nghỉ việc)</option></select>` : ''}
       <div id="u-pages"><label>Fanpage được giao</label>
       ${pages.length > 1 ? '<label class="check"><input type="checkbox" id="u-all"> <b>Chọn tất cả</b></label>' : ''}
-      ${pages.length ? pages.map((p) => `<label class="check"><input type="checkbox" data-pg value=""${esc(p.id)}" ${u?.page_ids.includes(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('') : '<div class="muted small">Chưa có Fanpage nào được kết nối.</div>'}
+      ${pages.length ? pages.map((p) => `<label class="check"><input type="checkbox" data-pg value="${esc(p.id)}" ${u?.page_ids.includes(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('') : '<div class="muted small">Chưa có Fanpage nào được kết nối.</div>'}
       </div><div class="muted small" id="u-ownernote">Chủ hệ thống luôn thấy mọi Fanpage.</div>
       <div id="umsg"></div>
       <div class="actions"><button type="button" class="btn ghost" data-cancel>Hủy</button><button class="btn">${u ? 'Lưu' : 'Tạo tài khoản'}</button></div>
@@ -1801,7 +1878,7 @@ const ACTIONS = {
   user_created: 'Tạo tài khoản', user_updated: 'Sửa tài khoản', user_unlocked: 'Mở khóa tài khoản',
   post_created: 'Soạn bài nháp', post_updated: 'Sửa bài', post_submitted: 'Gửi duyệt bài', post_rejected: 'Từ chối bài',
   post_published: 'Đăng bài lên Fanpage', post_scheduled: 'Hẹn giờ đăng bài', post_publish_failed: 'Đăng bài lỗi',
-  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', competitor_added: 'Thêm đối thủ', competitor_updated: 'Sửa đối thủ', competitor_removed: 'Xóa đối thủ', competitor_item_added: 'Lưu quảng cáo, bài đối thủ', competitor_item_removed: 'Xóa mục đối thủ', competitors_fetched: 'Cập nhật dữ liệu đối thủ', competitor_report: 'AI tổng hợp đối thủ', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
+  post_cancelled: 'Hủy lịch đăng', post_rescheduled: 'Sửa bài hẹn giờ', page_style_updated: 'Thiết lập footer Fanpage', source_added: 'Thêm nguồn nội dung', competitor_added: 'Thêm đối thủ', competitor_updated: 'Sửa đối thủ', competitor_removed: 'Xóa đối thủ', competitor_item_added: 'Lưu quảng cáo, bài đối thủ', competitor_item_removed: 'Xóa mục đối thủ', competitors_fetched: 'Cập nhật dữ liệu đối thủ', competitor_report: 'AI tổng hợp đối thủ', video_keywords_updated: 'Sửa từ khóa video tham khảo', videos_fetched: 'Lấy video tham khảo', video_added: 'Lưu video tham khảo', source_removed: 'Bỏ nguồn nội dung', post_deleted: 'Xóa bài nháp',
   media_uploaded: 'Tải ảnh/video lên', media_updated: 'Sửa thông tin ảnh/video', media_deleted: 'Xóa ảnh/video khỏi kho', ai_models_updated: 'Đổi model Claude', prompt_accepted: 'Thêm prompt bổ sung', prompt_dismissed: 'Bỏ qua prompt đề xuất', rules_updated: 'Sửa quy định đăng bài', ai_written: 'AI viết bài',
   inbox_replied: 'Trả lời khách', autoreply_updated: 'Sửa tự trả lời bình luận',
   topics_seeded: 'Nạp bộ chủ đề mẫu', topics_replaced: 'Thay bộ chủ đề mẫu', topic_created: 'Thêm chủ đề', topic_updated: 'Sửa chủ đề', topic_deleted: 'Xóa chủ đề', page_brief_updated: 'Sửa hồ sơ Fanpage',
@@ -2435,6 +2512,7 @@ async function render() {
       case 'fanpage': return await viewPages(q);
       case 'bai-dang': return await viewPosts(q);
       case 'bao-cao': return await viewReport();
+      case 'video-tham-khao': return me.role !== 'agent' ? await viewVideos() : go('tong-quan');
       case 'doi-thu': return me.role !== 'agent' ? await viewCompetitors() : go('tong-quan');
       case 'nguon-noi-dung': return await viewSources();
       case 'chu-de': return me.role !== 'agent' ? await viewTopics(q) : go('tong-quan');

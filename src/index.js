@@ -17,6 +17,7 @@ import * as overviewR from './routes/overview.js';
 import * as topics from './routes/topics.js';
 import * as assistant from './routes/assistant.js';
 import * as competitors from './routes/competitors.js';
+import * as videos from './routes/videos.js';
 
 // [method, mẫu đường dẫn, hàm, tùy chọn]
 // public: không cần đăng nhập · external: yêu cầu từ máy chủ khác (Facebook), bỏ kiểm tra cùng nguồn vì đã kiểm tra chữ ký · allowMustChange: dùng được khi chưa đổi mật khẩu lần đầu · nav: điều hướng trình duyệt (lỗi thì chuyển trang)
@@ -103,6 +104,11 @@ const ROUTES = [
   ['PATCH', '/api/competitors/:id', competitors.updateCompetitor],
   ['DELETE', '/api/competitors/:id', competitors.deleteCompetitor],
   ['POST', '/api/competitors/:id/items', competitors.addItem],
+  ['GET', '/api/videos', videos.listVideos],
+  ['PUT', '/api/videos/keywords', videos.saveKeywords],
+  ['POST', '/api/videos', videos.addVideo],
+  ['POST', '/api/videos/fetch', videos.fetchVideos],
+  ['PATCH', '/api/videos/:id', videos.updateVideo],
   ['GET', '/api/ads/accounts', ads.listAdAccounts],
   ['GET', '/api/ads/accounts/:id/campaigns', ads.accountCampaigns],
   ['GET', '/api/ads/campaigns/:id', ads.campaignDetail],
@@ -188,7 +194,13 @@ export default {
   // Cron 15,45 22,23 * * * (UTC) = 5h15 đến 6h45 sáng, 4 lượt: theo dõi đối thủ, lấy bài website và tin báo mới
   // (miễn phí, chỉ đọc nguồn công khai). Mỗi lượt cập nhật một phần đối thủ chưa cập nhật trong 20 giờ, vì giới hạn số lượt gọi ra ngoài.
   async scheduled(event, env, ctx) {
-    if (event.cron === '15,45 22,23 * * *') { ctx.waitUntil(competitors.runCompetitors(env, { staleHours: 20 }).catch((e) => console.error('competitors', e?.message))); return; }
+    if (event.cron === '15,45 22,23 * * *') {
+      // Lượt 5h15 lấy video YouTube tham khảo; 3 lượt còn lại cập nhật đối thủ.
+      const d = new Date(event.scheduledTime);
+      if (d.getUTCHours() === 22 && d.getUTCMinutes() < 30) ctx.waitUntil(videos.runVideos(env).catch((e) => console.error('videos', e?.message)));
+      else ctx.waitUntil(competitors.runCompetitors(env, { staleHours: 20 }).catch((e) => console.error('competitors', e?.message)));
+      return;
+    }
     ctx.waitUntil(assistant.runDaily(env).catch((e) => console.error('assistant', e?.message)));
   },
 };
