@@ -7,7 +7,7 @@ import { audit } from '../lib/audit.js';
 import { safeUrl } from './sources.js';
 import { mentions } from './competitors.js';
 
-export const DEFAULT_KEYWORDS = ['FarmBase', 'mã số vùng trồng', 'truy xuất nguồn gốc nông sản', 'nhật ký điện tử nông nghiệp', 'EUDR cà phê', 'bán hàng online nông sản', 'livestream bán nông sản'];
+export const DEFAULT_KEYWORDS = ['FarmBase', 'truy xuất nguồn gốc', 'truy xuất nguồn gốc nông sản', 'GS1', 'mã vạch GS1', 'nông nghiệp', 'chuyển đổi số nông nghiệp', 'nông nghiệp số', 'mã số vùng trồng', 'nhật ký canh tác điện tử', '10.000 ha cây trồng chủ lực', 'HTX DaLa'];
 export const SHORT_MAX_S = 180; // YouTube Shorts dài tối đa 3 phút
 const MAX_KEYWORDS = 12;
 const MAX_COMPETITOR_SEARCH = 20; // tìm thêm video nhắc tên đối thủ (giới hạn lượt gọi ra ngoài mỗi lần chạy)
@@ -60,35 +60,8 @@ export function isVietnamese(text, lang = '') {
   return /^vi\b/i.test(String(lang || ''));
 }
 
-export async function runVideos(env, { userId = null } = {}) {
-  if (!env.YOUTUBE_API_KEY) return { total: 0, log: ['Chưa có YOUTUBE_API_KEY'], skipped: true };
-  const t = now();
-  const keywords = (await keywordsOf(env)).slice(0, MAX_KEYWORDS);
-  const after = new Date((t - DAYS_BACK * 86400) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const found = new Map(); const log = [];
-  for (const kw of keywords) {
-    try {
-      const d = await yt(env, 'search', { part: 'snippet', type: 'video', q: kw, regionCode: 'VN', relevanceLanguage: 'vi', publishedAfter: after, order: 'relevance', maxResults: String(PER_KEYWORD) });
-      let n = 0;
-      for (const it of d.items || []) { const id = it.id?.videoId; if (id && !found.has(id)) { found.set(id, kw); n++; } }
-      log.push(`${kw}: ${n} video`);
-    } catch (e) { log.push(`${kw}: ${e.message}`); if (e.code === 'yt_quota' || e.code === 'yt_key') break; }
-  }
-  // Video nhắc tới đối thủ: tìm theo từ khóa của đối thủ, chỉ giữ video có tên đối thủ trong tiêu đề hoặc tên kênh.
-  const compOf = new Map();
-  const { results: comps } = await env.DB.prepare("SELECT id, name, keywords FROM social_competitors WHERE active = 1 AND keywords != '' ORDER BY id").all().catch(() => ({ results: [] }));
-  for (const c of comps.slice(0, MAX_COMPETITOR_SEARCH)) {
-    try {
-      const d = await yt(env, 'search', { part: 'snippet', type: 'video', q: `"${c.keywords}"`, regionCode: 'VN', relevanceLanguage: 'vi', publishedAfter: after, order: 'date', maxResults: '8' });
-      let n = 0;
-      for (const it of d.items || []) {
-        const id = it.id?.videoId;
-        if (!id || !mentions({ title: `${it.snippet?.title || ''} ${it.snippet?.channelTitle || ''}`, summary: '' }, c)) continue;
-        compOf.set(id, c.id); if (!found.has(id)) { found.set(id, c.keywords); n++; }
-      }
-      if (n) log.push(`Đối thủ ${c.name}: ${n} video`);
-    } catch (e) { log.push(`Đối thủ ${c.name}: ${e.message}`); if (e.code === 'yt_quota' || e.code === 'yt_key') break; }
-  }
+// Lấy chi tiết (thời lượng, lượt xem) và lưu các video YouTube mới; chỉ lưu video tiếng Việt.
+async function storeVideos(env, found, compOf, t, log) {
   const ids = [...found.keys()];
   const existing = new Set();
   for (let i = 0; i < ids.length; i += 50) {
@@ -128,6 +101,39 @@ export async function runVideos(env, { userId = null } = {}) {
       await env.DB.prepare(`UPDATE social_videos SET last_seen_at = ? WHERE platform = 'youtube' AND video_id IN (${part.map(() => '?').join(',')})`).bind(t, ...part).run();
     }
   }
+  return { added, skippedLang, existing };
+}
+
+export async function runVideos(env, { userId = null } = {}) {
+  if (!env.YOUTUBE_API_KEY) return { total: 0, log: ['Chưa có YOUTUBE_API_KEY'], skipped: true };
+  const t = now();
+  const keywords = (await keywordsOf(env)).slice(0, MAX_KEYWORDS);
+  const after = new Date((t - DAYS_BACK * 86400) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const found = new Map(); const log = [];
+  for (const kw of keywords) {
+    try {
+      const d = await yt(env, 'search', { part: 'snippet', type: 'video', q: kw, regionCode: 'VN', relevanceLanguage: 'vi', publishedAfter: after, order: 'relevance', maxResults: String(PER_KEYWORD) });
+      let n = 0;
+      for (const it of d.items || []) { const id = it.id?.videoId; if (id && !found.has(id)) { found.set(id, kw); n++; } }
+      log.push(`${kw}: ${n} video`);
+    } catch (e) { log.push(`${kw}: ${e.message}`); if (e.code === 'yt_quota' || e.code === 'yt_key') break; }
+  }
+  // Video nhắc tới đối thủ: tìm theo từ khóa của đối thủ, chỉ giữ video có tên đối thủ trong tiêu đề hoặc tên kênh.
+  const compOf = new Map();
+  const { results: comps } = await env.DB.prepare("SELECT id, name, keywords FROM social_competitors WHERE active = 1 AND keywords != '' ORDER BY id").all().catch(() => ({ results: [] }));
+  for (const c of comps.slice(0, MAX_COMPETITOR_SEARCH)) {
+    try {
+      const d = await yt(env, 'search', { part: 'snippet', type: 'video', q: `"${c.keywords}"`, regionCode: 'VN', relevanceLanguage: 'vi', publishedAfter: after, order: 'date', maxResults: '8' });
+      let n = 0;
+      for (const it of d.items || []) {
+        const id = it.id?.videoId;
+        if (!id || !mentions({ title: `${it.snippet?.title || ''} ${it.snippet?.channelTitle || ''}`, summary: '' }, c)) continue;
+        compOf.set(id, c.id); if (!found.has(id)) { found.set(id, c.keywords); n++; }
+      }
+      if (n) log.push(`Đối thủ ${c.name}: ${n} video`);
+    } catch (e) { log.push(`Đối thủ ${c.name}: ${e.message}`); if (e.code === 'yt_quota' || e.code === 'yt_key') break; }
+  }
+  const { added, skippedLang } = await storeVideos(env, found, compOf, t, log);
   if (skippedLang) log.push(`Bỏ qua ${skippedLang} video không phải tiếng Việt`);
   // Ẩn video tự lấy trước đây mà không phải tiếng Việt (chỉ ẩn, không xóa).
   const { results: olds } = await env.DB.prepare("SELECT id, title, description FROM social_videos WHERE platform = 'youtube' AND source = 'auto' AND hidden = 0").all();
@@ -150,6 +156,8 @@ export async function listVideos(request, env, user) {
   const where = ['v.hidden = 0', 'COALESCE(v.published_at, v.first_seen_at) >= ?']; const args = [now() - days * 86400];
   if (['clip', 'short', 'reel'].includes(q.get('kind'))) { where.push('v.kind = ?'); args.push(q.get('kind')); }
   if (q.get('keyword')) { where.push('v.keyword = ?'); args.push(q.get('keyword')); }
+  const text = (q.get('q') || '').trim().slice(0, 80);
+  if (text) { where.push('(v.title LIKE ? OR v.channel LIKE ? OR v.note LIKE ? OR v.keyword LIKE ?)'); args.push(...Array(4).fill(`%${text}%`)); }
   if (q.get('competitor') === 'any') where.push('v.competitor_id IS NOT NULL');
   else if (q.get('competitor')) { where.push('v.competitor_id = ?'); args.push(Number(q.get('competitor'))); }
   if (q.get('starred') === '1') { where.push('v.starred = 1'); }
@@ -187,6 +195,37 @@ export async function fetchVideos(request, env, user) {
   const r = await runVideos(env, { userId: user.id });
   await audit(env, request, user.id, 'videos_fetched', `${r.total} video mới`);
   return json(r);
+}
+
+const MAX_SEARCH_PER_DAY = 40; // mỗi lần tìm tốn 100 đơn vị trong hạn mức miễn phí 10.000 đơn vị/ngày của YouTube
+
+// POST /api/videos/search { q }: tìm video YouTube tiếng Việt theo chữ người dùng gõ, lưu kết quả vào danh sách.
+export async function searchVideos(request, env, user) {
+  staffOnly(user);
+  if (!env.YOUTUBE_API_KEY) throw new HttpError(409, 'Chưa có khóa YouTube. Vui lòng nhờ Chủ hệ thống thêm biến bí mật YOUTUBE_API_KEY trong Cloudflare.', 'no_key');
+  const body = await readJson(request);
+  const q = clean(body.q, 100);
+  if (q.length < 2) throw new HttpError(400, 'Vui lòng nhập ít nhất 2 ký tự để tìm', 'bad_query');
+  const t = now();
+  const day = new Date((t + 7 * 3600) * 1000).toISOString().slice(0, 10);
+  const used = Number(await getSetting(env, `video_search_count:${day}`, 0)) || 0;
+  if (used >= MAX_SEARCH_PER_DAY) throw new HttpError(429, `Hôm nay đã tìm ${MAX_SEARCH_PER_DAY} lần, chạm giới hạn miễn phí. Vui lòng tìm lại vào ngày mai.`, 'search_limit');
+  await putSetting(env, `video_search_count:${day}`, used + 1, user.id);
+  const d = await yt(env, 'search', { part: 'snippet', type: 'video', q, regionCode: 'VN', relevanceLanguage: 'vi', order: 'relevance', maxResults: '25' });
+  const found = new Map();
+  for (const it of d.items || []) { const id = it.id?.videoId; if (id && !found.has(id)) found.set(id, q); }
+  const log = [];
+  const { added, skippedLang } = await storeVideos(env, found, new Map(), t, log);
+  const ids = [...found.keys()];
+  let items = [];
+  if (ids.length) {
+    const { results } = await env.DB.prepare(`SELECT v.id, v.platform, v.kind, v.video_id, v.url, v.title, v.channel, v.thumb, v.published_at, v.duration_s, v.views, v.keyword, v.idea, v.note, v.source, v.starred, v.first_seen_at, v.competitor_id, c.name AS competitor_name
+      FROM social_videos v LEFT JOIN social_competitors c ON c.id = v.competitor_id WHERE v.platform = 'youtube' AND v.hidden = 0 AND v.video_id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all();
+    const order = new Map(ids.map((id, i) => [id, i]));
+    items = results.sort((x, y) => order.get(x.video_id) - order.get(y.video_id)).map((r) => ({ ...r, starred: !!r.starred }));
+  }
+  await audit(env, request, user.id, 'videos_searched', q, { added: added.length });
+  return json({ q, items, added: added.length, skipped_lang: skippedLang, left: MAX_SEARCH_PER_DAY - used - 1 });
 }
 
 // PATCH /api/videos/:id { starred?, hidden? }

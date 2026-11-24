@@ -109,6 +109,7 @@ const ROUTES = [
   ['PUT', '/api/videos/keywords', videos.saveKeywords],
   ['POST', '/api/videos', videos.addVideo],
   ['POST', '/api/videos/fetch', videos.fetchVideos],
+  ['POST', '/api/videos/search', videos.searchVideos],
   ['PATCH', '/api/videos/:id', videos.updateVideo],
   ['GET', '/api/ads/accounts', ads.listAdAccounts],
   ['GET', '/api/ads/accounts/:id/campaigns', ads.accountCampaigns],
