@@ -54,13 +54,18 @@ export async function currentUser(env, request) {
   const token = getCookie(request, COOKIE);
   if (!token) return null;
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.name, u.role, u.must_change_password, u.status, s.id AS session_id
+    `SELECT u.id, u.email, u.name, u.role, u.must_change_password, u.status, u.last_seen_at, s.id AS session_id
      FROM social_sessions s JOIN social_users u ON u.id = s.user_id
      WHERE s.id = ? AND s.expires_at > ?`
   )
     .bind(await sha256(token), now())
     .first();
   if (!row || row.status !== 'active') return null;
+  // Ghi thời điểm hoạt động gần nhất (tối đa 5 phút một lần để đỡ lượt ghi D1), phục vụ giám sát nhân sự.
+  const t = now();
+  if (!row.last_seen_at || t - row.last_seen_at > 300) {
+    await env.DB.prepare('UPDATE social_users SET last_seen_at = ? WHERE id = ?').bind(t, row.id).run().catch(() => {});
+  }
   return row;
 }
 

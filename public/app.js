@@ -1864,7 +1864,7 @@ async function viewUsers() {
       <td>${esc(u.role_label)}</td><td class="small">${pg}</td><td class="small muted">${fmtTime(u.last_login_at)}</td>
       <td><div class="row"><button class="btn ghost sm" data-edit="${u.id}">Sửa</button>
         ${u.locked ? `<button class="btn ghost sm" data-unlock="${u.id}">Mở khóa</button>` : ''}
-        <button class="btn ghost sm" data-reset="${u.id}">Cấp lại mật khẩu</button></div></td></tr>`;
+        <button class="btn ghost sm" data-reset="${u.id}">Cấp lại mật khẩu</button><button class="btn ghost sm" data-ulog="${u.id}">Nhật ký</button></div></td></tr>`;
   }).join('');
   document.getElementById('view').innerHTML = `<div class="card"><table class="cards"><thead><tr><th>Nhân viên</th><th>Vai trò</th><th>Fanpage được giao</th><th>Đăng nhập gần nhất</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="card"><h2>Quyền của từng vai trò</h2><ul class="muted small" style="margin:0;padding-left:20px">
@@ -1923,6 +1923,7 @@ async function viewUsers() {
   document.querySelectorAll('[data-unlock]').forEach((b) => (b.onclick = async () => {
     try { await api(`/api/users/${b.dataset.unlock}/unlock`, { method: 'POST' }); toast('Đã mở khóa'); viewUsers(); } catch (e) { toast(e.message); }
   }));
+  document.querySelectorAll('[data-ulog]').forEach((b) => (b.onclick = () => { Object.assign(audState, { user: b.dataset.ulog, group: '', from: '', to: '', q: '', failed: false }); location.hash = '#/nhat-ky'; }));
   document.querySelectorAll('[data-reset]').forEach((b) => (b.onclick = async () => {
     const u = users.find((x) => x.id === Number(b.dataset.reset));
     if (!(await confirmBox('Cấp lại mật khẩu?', `${u.email} sẽ bị đăng xuất khỏi mọi thiết bị và phải đổi mật khẩu khi đăng nhập lại.`, 'Cấp lại'))) return;
@@ -1946,13 +1947,90 @@ const ACTIONS = {
   pages_connected: 'Kết nối Fanpage', pages_connect_failed: 'Kết nối Fanpage lỗi', page_disconnected: 'Ngắt Fanpage',
 };
 
+const audState = { user: '', group: '', from: '', to: '', q: '', failed: false };
+const AUD_GROUPS = [['', 'Tất cả thao tác'], ['dang-nhap', 'Đăng nhập, mật khẩu'], ['bai-dang', 'Bài đăng'], ['tin-nhan', 'Tin nhắn, bình luận'], ['chu-de-ai', 'Chủ đề, trợ lý AI'], ['kho-media', 'Kho ảnh, video'], ['nghien-cuu', 'Nguồn, đối thủ, video'], ['quan-tri', 'Nhân viên, Fanpage']];
+const AUD_BAD = new Set(['login_failed', 'account_locked', 'post_publish_failed', 'pages_connect_failed']);
+// Rút gọn thông tin trình duyệt thành "Máy, trình duyệt" dễ đọc.
+function shortUA(ua) {
+  if (!ua) return '';
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac OS X|Macintosh/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'Thiết bị khác';
+  const br = /Zalo/i.test(ua) ? 'Zalo' : /FBAN|FBAV/.test(ua) ? 'Facebook' : /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /CocCoc|coc_coc/i.test(ua) ? 'Cốc Cốc' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+  return br ? `${os}, ${br}` : os;
+}
+const vnDay = (d, add = 0) => (d ? Math.floor(Date.parse(`${d}T00:00:00+07:00`) / 1000) + add : 0);
+function audQuery(extra = {}) {
+  const qs = new URLSearchParams({ limit: '100' });
+  if (audState.user) qs.set('user', audState.user);
+  if (audState.group) qs.set('group', audState.group);
+  if (audState.from) qs.set('from', String(vnDay(audState.from)));
+  if (audState.to) qs.set('to', String(vnDay(audState.to, 86400)));
+  if (audState.q) qs.set('q', audState.q);
+  if (audState.failed) qs.set('failed', '1');
+  for (const [k, v] of Object.entries(extra)) qs.set(k, v);
+  return qs;
+}
+function audRow(e) {
+  const dev = [shortUA(e.user_agent), e.ip].filter(Boolean).join(' · ');
+  return `<tr><td class="small muted">${fmtTime(e.created_at)}</td><td class="small">${esc(e.user_name || e.user_email || (e.action === 'login_failed' ? 'Không rõ' : 'Hệ thống'))}</td>
+    <td>${AUD_BAD.has(e.action) ? `<span class="badge err">${esc(ACTIONS[e.action] || e.action)}</span>` : esc(ACTIONS[e.action] || e.action)}</td><td class="small">${esc(e.target || '')}</td><td class="small muted">${esc(dev)}</td></tr>`;
+}
+
 async function viewAudit() {
-  layout('nhat-ky', 'Nhật ký', 'Ai làm gì, lúc nào (200 thao tác gần nhất)', '<div class="muted">Đang tải…</div>');
-  const { entries } = await api('/api/audit?limit=200');
-  document.getElementById('view').innerHTML = `<div class="card"><table class="cards"><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Thao tác</th><th>Đối tượng</th></tr></thead><tbody>
-    ${entries.map((e) => `<tr><td class="small muted">${fmtTime(e.created_at)}</td><td class="small">${esc(e.user_name || e.user_email || '–')}</td>
-      <td>${esc(ACTIONS[e.action] || e.action)}</td><td class="small">${esc(e.target || '')}</td></tr>`).join('')}
-  </tbody></table></div>`;
+  layout('nhat-ky', 'Nhật ký', 'Giám sát đăng nhập và thao tác của nhân sự', '<div class="muted">Đang tải…</div>');
+  const d = await api(`/api/audit?${audQuery()}`);
+  const v = document.getElementById('view');
+  const staff = d.staff || [];
+  const sRows = staff.map((u) => {
+    const locked = u.locked_until && u.locked_until > Date.now() / 1000;
+    return `<tr><td><b>${esc(u.name || '–')}</b><div class="muted small">${esc(u.email)}</div>${u.status !== 'active' ? '<span class="badge off">Đã khóa</span>' : ''}${locked ? '<span class="badge err">Tạm khóa do nhập sai</span>' : ''}</td>
+      <td class="small">${u.last_login_at ? fmtTime(u.last_login_at) : '–'}<div class="muted">${esc([shortUA(u.last_ua), u.last_ip].filter(Boolean).join(' · '))}</div></td>
+      <td class="small">${u.last_seen_at ? fmtTime(u.last_seen_at) : '–'}</td>
+      <td class="small">${u.logins || 0}</td><td class="small">${u.failed ? `<span class="badge err">${u.failed}</span>` : '0'}</td><td class="small">${u.actions || 0}</td>
+      <td><button class="btn ghost sm" data-aud-user="${u.id}">Xem nhật ký</button></td></tr>`;
+  }).join('');
+  v.innerHTML = `<div class="card"><h2>Nhân sự 7 ngày qua</h2>
+      <table class="cards"><thead><tr><th>Nhân viên</th><th>Đăng nhập gần nhất</th><th>Hoạt động gần nhất</th><th>Lần đăng nhập</th><th>Đăng nhập sai</th><th>Thao tác</th><th></th></tr></thead><tbody>${sRows}</tbody></table>
+      ${d.unknown_failed ? `<div class="alert warn">${d.unknown_failed} lần đăng nhập sai bằng email không có trong hệ thống trong 7 ngày qua. Chọn loại "Đăng nhập, mật khẩu" để xem.</div>` : ''}
+      <div class="muted small">"Hoạt động gần nhất" là lần cuối nhân viên mở hệ thống (cập nhật 5 phút một lần). "Thao tác" gồm soạn, sửa, duyệt, đăng bài, trả lời khách, sửa chủ đề… không tính đăng nhập.</div></div>
+    <div class="card filters audf">
+      <div><label for="aud-user">Nhân viên</label><select id="aud-user"><option value="">Tất cả</option>${staff.map((u) => `<option value="${u.id}">${esc(u.name || u.email)}</option>`).join('')}<option value="system">Hệ thống tự chạy, không rõ</option></select></div>
+      <div><label for="aud-group">Loại thao tác</label><select id="aud-group">${AUD_GROUPS.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
+      <div><label for="aud-from">Từ ngày</label><input type="date" id="aud-from" value="${esc(audState.from)}"></div>
+      <div><label for="aud-to">Đến ngày</label><input type="date" id="aud-to" value="${esc(audState.to)}"></div>
+      <div><label for="aud-q">Tìm theo đối tượng</label><input id="aud-q" maxlength="80" placeholder="Tên bài, email, Fanpage…" value="${esc(audState.q)}"></div>
+      <div class="end"><label class="check"><input type="checkbox" id="aud-failed" ${audState.failed ? 'checked' : ''}> Chỉ lỗi, đăng nhập sai</label></div>
+      <div class="end row"><button class="btn sm" id="aud-go">Lọc</button><button class="btn ghost sm" id="aud-reset">Bỏ lọc</button><button class="btn ghost sm" id="aud-csv">Tải CSV</button></div></div>
+    <div class="card"><table class="cards"><thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Thao tác</th><th>Đối tượng</th><th>Thiết bị, IP</th></tr></thead><tbody id="aud-rows">
+      ${d.entries.map(audRow).join('') || '<tr><td colspan="5" class="muted">Không có thao tác nào khớp bộ lọc.</td></tr>'}</tbody></table>
+      ${d.more ? '<div class="row"><button class="btn ghost sm" id="aud-more">Xem thêm</button></div>' : ''}</div>`;
+  v.querySelector('#aud-user').value = audState.user;
+  v.querySelector('#aud-group').value = audState.group;
+  const read = () => Object.assign(audState, { user: v.querySelector('#aud-user').value, group: v.querySelector('#aud-group').value, from: v.querySelector('#aud-from').value, to: v.querySelector('#aud-to').value, q: v.querySelector('#aud-q').value.trim(), failed: v.querySelector('#aud-failed').checked });
+  v.querySelector('#aud-go').onclick = () => { read(); viewAudit(); };
+  v.querySelector('#aud-q').onkeydown = (e) => { if (e.key === 'Enter') { read(); viewAudit(); } };
+  ['#aud-user', '#aud-group', '#aud-failed'].forEach((sel) => { v.querySelector(sel).onchange = () => { read(); viewAudit(); }; });
+  v.querySelector('#aud-reset').onclick = () => { Object.assign(audState, { user: '', group: '', from: '', to: '', q: '', failed: false }); viewAudit(); };
+  v.querySelectorAll('[data-aud-user]').forEach((b) => { b.onclick = () => { audState.user = b.dataset.audUser; viewAudit(); }; });
+  let lastId = d.entries.length ? d.entries[d.entries.length - 1].id : 0;
+  const more = v.querySelector('#aud-more');
+  if (more) more.onclick = async () => {
+    more.disabled = true;
+    const r = await api(`/api/audit?${audQuery({ before: String(lastId), summary: '0' })}`);
+    v.querySelector('#aud-rows').insertAdjacentHTML('beforeend', r.entries.map(audRow).join(''));
+    if (r.entries.length) lastId = r.entries[r.entries.length - 1].id;
+    if (r.more) more.disabled = false; else more.remove();
+  };
+  v.querySelector('#aud-csv').onclick = async (e) => {
+    read(); e.target.disabled = true;
+    const r = await api(`/api/audit?${audQuery({ limit: '500', summary: '0' })}`).finally(() => { e.target.disabled = false; });
+    const cell = (x) => `"${String(x ?? '').replace(/"/g, '""')}"`;
+    const lines = [['Thời gian', 'Người thực hiện', 'Email', 'Thao tác', 'Đối tượng', 'Thiết bị', 'IP'].map(cell).join(',')]
+      .concat(r.entries.map((x) => [new Date(x.created_at * 1000).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }), x.user_name || '', x.user_email || '', ACTIONS[x.action] || x.action, x.target || '', shortUA(x.user_agent), x.ip || ''].map(cell).join(',')));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = `nhat-ky-farmbase-social-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
 }
 
 // ---------- Tài khoản ----------

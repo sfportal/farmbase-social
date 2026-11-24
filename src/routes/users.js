@@ -140,13 +140,72 @@ export async function unlockUser(request, env, user, id) {
   return json({ ok: true });
 }
 
+// Nhóm thao tác để lọc nhật ký (khớp tiền tố tên thao tác).
+export const AUDIT_GROUPS = {
+  'dang-nhap': ['login', 'logout', 'logout_all', 'login_failed', 'account_locked', 'password_changed', 'password_reset'],
+  'bai-dang': ['post_%', 'ai_written', 'ai_revised', 'ai_media_prompt', 'rules_updated', 'page_style_updated'],
+  'tin-nhan': ['inbox_%', 'autoreply_%'],
+  'chu-de-ai': ['topic%', 'knowledge_%', 'suggestion_%', 'assistant_%', 'plan_%', 'page_brief_updated', 'prompt_%', 'ai_models_updated'],
+  'kho-media': ['media_%'],
+  'nghien-cuu': ['competitor%', 'video%', 'source_%'],
+  'quan-tri': ['user_%', 'pages_%', 'page_disconnected'],
+};
+
+function groupWhere(group) {
+  const pats = AUDIT_GROUPS[group];
+  if (!pats) return null;
+  return { sql: '(' + pats.map((p) => (p.includes('%') ? 'a.action LIKE ?' : 'a.action = ?')).join(' OR ') + ')', binds: pats };
+}
+
 export async function listAudit(request, env, user) {
   requireRole(user, 'owner');
   const url = new URL(request.url);
-  const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 500);
+  const q = url.searchParams;
+  const limit = Math.min(Math.max(Number(q.get('limit')) || 100, 1), 500);
+  const where = []; const binds = [];
+  const uid = q.get('user');
+  if (uid === 'system') where.push('a.user_id IS NULL');
+  else if (uid && /^\d+$/.test(uid)) { where.push('a.user_id = ?'); binds.push(Number(uid)); }
+  const g = groupWhere(q.get('group'));
+  if (g) { where.push(g.sql); binds.push(...g.binds); }
+  if (q.get('failed') === '1') where.push("a.action IN ('login_failed', 'account_locked', 'post_publish_failed', 'pages_connect_failed')");
+  const from = Number(q.get('from')); const to = Number(q.get('to'));
+  if (from > 0) { where.push('a.created_at >= ?'); binds.push(from); }
+  if (to > 0) { where.push('a.created_at < ?'); binds.push(to); }
+  const before = Number(q.get('before'));
+  if (before > 0) { where.push('a.id < ?'); binds.push(before); }
+  const text = (q.get('q') || '').trim().slice(0, 80);
+  if (text) { where.push('(a.target LIKE ? OR a.detail LIKE ?)'); binds.push(`%${text}%`, `%${text}%`); }
   const { results } = await env.DB.prepare(
-    `SELECT a.id, a.action, a.target, a.detail, a.ip, a.created_at, u.email AS user_email, u.name AS user_name
-     FROM social_audit_log a LEFT JOIN social_users u ON u.id = a.user_id ORDER BY a.id DESC LIMIT ?`
-  ).bind(limit).all();
-  return json({ entries: results });
+    `SELECT a.id, a.user_id, a.action, a.target, a.detail, a.ip, a.user_agent, a.created_at, u.email AS user_email, u.name AS user_name
+     FROM social_audit_log a LEFT JOIN social_users u ON u.id = a.user_id
+     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY a.id DESC LIMIT ?`
+  ).bind(...binds, limit + 1).all();
+  const more = results.length > limit;
+  const entries = results.slice(0, limit);
+  if (q.get('summary') === '0') return json({ entries, more });
+  // Tổng hợp từng nhân viên trong 7 ngày: số lần đăng nhập, đăng nhập sai, số thao tác, lần hoạt động gần nhất.
+  const since = Math.floor(Date.now() / 1000) - 7 * 86400;
+  const { results: staff } = await env.DB.prepare(
+    `SELECT u.id, u.name, u.email, u.role, u.status, u.last_login_at, u.last_seen_at, u.locked_until,
+       SUM(CASE WHEN a.action = 'login' THEN 1 ELSE 0 END) AS logins,
+       SUM(CASE WHEN a.action IN ('login_failed', 'account_locked') THEN 1 ELSE 0 END) AS failed,
+       SUM(CASE WHEN a.action NOT IN ('login', 'logout', 'logout_all', 'login_failed', 'account_locked') THEN 1 ELSE 0 END) AS actions,
+       MAX(a.created_at) AS last_action_at
+     FROM social_users u LEFT JOIN social_audit_log a ON a.user_id = u.id AND a.created_at >= ?
+     GROUP BY u.id ORDER BY u.role = 'owner' DESC, u.name`
+  ).bind(since).all();
+  const { results: last } = await env.DB.prepare(
+    `SELECT a.user_id, a.ip, a.user_agent FROM social_audit_log a
+     WHERE a.id IN (SELECT MAX(id) FROM social_audit_log WHERE action = 'login' AND user_id IS NOT NULL GROUP BY user_id)`
+  ).all();
+  const lastBy = new Map(last.map((r) => [r.user_id, r]));
+  const { results: unknown } = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM social_audit_log WHERE action = 'login_failed' AND user_id IS NULL AND created_at >= ?"
+  ).bind(since).all();
+  return json({
+    entries, more,
+    staff: staff.map((u) => ({ ...u, last_ip: lastBy.get(u.id)?.ip || null, last_ua: lastBy.get(u.id)?.user_agent || null })),
+    unknown_failed: unknown[0]?.n || 0,
+  });
 }

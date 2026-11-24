@@ -499,3 +499,8 @@ details.cmp .btn { margin-top: 6px; }
 
 /* Chữ dài (link, từ khóa) trong bảng không làm tràn ngang trên điện thoại */
 table.cards td { overflow-wrap: anywhere; }
+
+/* Nhật ký: bộ lọc */
+.filters.audf { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.filters.audf > div:first-child { grid-column: auto; }
+.filters.audf .row { flex-wrap: wrap; gap: 6px; }
