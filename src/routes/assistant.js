@@ -12,6 +12,7 @@ import { getRules, getPageStyles, enforceStyle, tidy, ruleLimits } from './writi
 import { loadTopics, getBrief } from './topics.js';
 import { fetchText, parseFeed, parseWp, parseNews } from './sources.js';
 import { pageEngagement, cachedEngagement } from './engagement.js';
+import { PROMPT_LIB } from '../lib/prompt-lib.js';
 
 const VN = 7 * 3600;
 const DAY = 86400;
@@ -98,6 +99,14 @@ function assistantSystem(rules, page, note) {
     note ? `LƯU Ý RIÊNG CỦA FANPAGE "${page.name}": ${note}` : '',
     'Khi được yêu cầu trả JSON: chỉ trả đúng một đối tượng JSON hợp lệ, không giải thích thêm.',
   ].filter(Boolean).join('\n\n');
+}
+
+// Thư viện prompt: mẫu có sẵn (public/prompt) và mẫu bổ sung Quý khách đã duyệt (social_settings 'prompt_extra').
+export async function promptLibrary(env) {
+  const extra = await getSetting(env, 'prompt_extra', []);
+  const out = { ...PROMPT_LIB };
+  for (const x of Array.isArray(extra) ? extra : []) if (x?.id && x.text) out[x.id] = { n: x.name, k: x.kind, t: x.text };
+  return out;
 }
 
 // ---------- Kiểm tra cứng theo quy tắc nội dung (không tốn token) ----------
@@ -283,11 +292,15 @@ export async function makeDrafts(env, page, date, cfg, log = []) {
   while (slots.length < want) slots.push({ topic_id: ctx.subs[slots.length % ctx.subs.length]?.id, angle: '', time: cfg.times[slots.length] || DEFAULT_TIMES[0] });
   const byId = Object.fromEntries(ctx.subs.map((s) => [s.id, s]));
   const campaign = /10\.?000/.test(page.name);
+  // Mẫu prompt trong Thư viện cho từng chỗ (mã trong kế hoạch, rồi mã của chủ đề con): AI chỉnh thành prompt hoàn chỉnh để Quý khách tự tạo hình.
+  const lib = await promptLibrary(env);
+  const tplIds = [...new Set(slots.flatMap((s) => [s.prompt_id, ...(byId[s.topic_id]?.prompt_ids || '').split(',')].filter((id) => id && lib[id]).slice(0, 2)))].slice(0, 4);
+  const tplText = tplIds.map((id) => `[${id}] ${lib[id].n} (${lib[id].k === 'video' ? 'video' : lib[id].k === 'image' ? 'ảnh' : 'tài liệu'}):\n${cut(lib[id].t, 700)}`).join('\n\n');
   const prompt = `[VIEC:draft] Viết ${slots.length} bài Facebook cho ngày ${date} (${weekday(date)}) trên Fanpage "${page.name}" theo kế hoạch:
 ${slots.map((s, i) => `${i + 1}. (id ${s.topic_id}) ${byId[s.topic_id]?.title || ''} | góc bài: ${s.angle || 'tự chọn theo chủ đề'} | định dạng: ${s.format || byId[s.topic_id]?.formats || ''} | hình: ${s.visual || ''}`).join('\n')}
 Mỗi bài 80 đến 180 chữ, mở bằng hook cụ thể, kết bằng câu kêu gọi theo CTA của chủ đề con.
-Prompt có thể chọn (theo chủ đề): ${[...new Set(slots.flatMap((s) => (byId[s.topic_id]?.prompt_ids || '').split(',').filter(Boolean)))].join(', ') || '-'}.
-Trả JSON {"posts":[{"topic_id":0,"hook":"câu móc","message":"thân bài hoàn chỉnh (gồm hook ở đầu, không gồm liên hệ và hashtag)","visual":"hình ảnh hoặc video cần thiết kế: kích thước, bố cục, chữ trên ảnh","prompt_id":"mã prompt","storyboard":"nếu là video: 4–6 dòng 'giây | hình | chữ trên màn hình | lời đọc', không phải video thì để trống","reason":"vì sao nên đăng bài này hôm đó (1–2 câu)","source":"link nguồn nếu dùng tin tức, không thì để trống"${cfg.website ? ',"website":{"title":"tiêu đề bài website dưới 60 ký tự","outline":"dàn ý 3–5 ý"}' : ''}}]}`;
+${tplText ? `MẪU PROMPT TRONG THƯ VIỆN (chọn 1 mẫu hợp nhất cho mỗi bài, chỉnh theo nội dung bài):\n${tplText}` : `Prompt có thể chọn (theo chủ đề): ${[...new Set(slots.flatMap((s) => (byId[s.topic_id]?.prompt_ids || '').split(',').filter(Boolean)))].join(', ') || '-'}.`}
+Trả JSON {"posts":[{"topic_id":0,"hook":"câu móc","message":"thân bài hoàn chỉnh (gồm hook ở đầu, không gồm liên hệ và hashtag)","visual":"hình ảnh hoặc video cần thiết kế: kích thước, bố cục, chữ trên ảnh","prompt_id":"mã mẫu prompt đã chọn","media_prompt":"prompt hoàn chỉnh, dán thẳng vào Claude hoặc công cụ tạo ảnh/video: dựa trên mẫu đã chọn, thay nội dung theo bài, ghi rõ khổ (4:5, 9:16...), bố cục, chữ trên hình bằng tiếng Việt có dấu, màu xanh FarmBase; không dùng ảnh người thật, không lộ tên, số điện thoại bà con","storyboard":"nếu là video: 4–6 dòng 'giây | hình | chữ trên màn hình | lời đọc', không phải video thì để trống","reason":"vì sao nên đăng bài này hôm đó (1–2 câu)","source":"link nguồn nếu dùng tin tức, không thì để trống"${cfg.website ? ',"website":{"title":"tiêu đề bài website dưới 60 ký tự","outline":"dàn ý 3–5 ý"}' : ''}}]}`;
   const { text, provider } = await generate(env, { tier: 'write', maxTokens: 6000, system: `${assistantSystem(st.value, page, style.note)}\n\n${ctx.text}`, prompt });
   const out = parseJson(text);
   let posts = Array.isArray(out?.posts) ? out.posts : Array.isArray(out) ? out : out?.message ? [out] : [];
@@ -313,7 +326,7 @@ Trả JSON {"posts":[{"topic_id":0,"hook":"câu móc","message":"thân bài hoà
     const meta = {
       date, by: 'assistant', provider: PROVIDER_LABELS[provider], hook: cut(p.hook, 200), visual: cut(p.visual || slot.visual, 600),
       prompt_id: /^[a-z]{2}-\d{2}$/.test(p.prompt_id || '') ? p.prompt_id : (sub?.prompt_ids || '').split(',')[0] || '',
-      storyboard: cut(p.storyboard, 1500), storyboard_id: sub?.storyboard_id || '', reason: cut(p.reason || slot.why, 500),
+      media_prompt: cut(p.media_prompt, 2500), storyboard: cut(p.storyboard, 1500), storyboard_id: sub?.storyboard_id || '', reason: cut(p.reason || slot.why, 500),
       angle: slot.angle || '', check: checked.check, website: cfg.website && p.website?.title ? { title: cut(p.website.title, 90), outline: cut(p.website.outline, 800) } : null,
       ads: sub?.ads ? cut(sub.ads, 400) : '', topic_title: sub?.title || '', parent_title: sub?.parent_title || '',
     };
@@ -368,6 +381,29 @@ export async function suggestTopics(env, page, log = []) {
   return log;
 }
 
+// ---------- 5. Đề xuất prompt mới cho Thư viện (thiết kế, hiệu ứng), Quý khách duyệt ----------
+const DESIGN_KEYWORDS = 'kinetic typography, chữ chuyển động theo nhịp, parallax, Ken Burns, split screen trước/sau, isometric 3D, glassmorphism, mockup điện thoại, infographic số liệu, carousel kể chuyện, macro cận cảnh nông sản, timelapse, map reveal, particle, light leak, chuyển cảnh match cut, stop motion, UGC dọc 9:16, before/after slider';
+export async function suggestPrompts(env, log = []) {
+  const lib = await promptLibrary(env);
+  const pending = (await getSetting(env, 'prompt_suggestions', [])).filter((x) => x.status === 'pending');
+  if (pending.length >= 6) { log.push(`Còn ${pending.length} prompt đề xuất chưa duyệt, tạm chưa đề xuất thêm`); return log; }
+  const { results: tops } = await env.DB.prepare("SELECT p.name AS page, t.title FROM social_topics t JOIN social_pages p ON p.id = t.page_id WHERE t.parent_id IS NULL AND t.status = 'active' ORDER BY p.name, t.sort LIMIT 20").all();
+  const names = Object.entries(lib).map(([id, x]) => `${id} ${cut(x.n, 60)}`).join('; ');
+  const { text } = await generate(env, {
+    tier: 'fast', maxTokens: 3500,
+    system: 'Bạn là giám đốc sáng tạo hình ảnh, video ngắn cho Fanpage nông nghiệp (FarmBase, Chiến dịch 10.000 ha). Đề xuất mẫu prompt MỚI cho thư viện, không trùng mẫu đã có, dùng được ngay với Claude hoặc công cụ tạo ảnh/video. Prompt viết tiếng Việt, cụ thể: khổ hình, bố cục, màu (xanh FarmBase #084C46, vàng #C9A227), chữ trên hình, chuyển động hoặc hiệu ứng, thời lượng nếu là video. Không dùng ảnh người thật nhận diện được, không số liệu triển khai, không CCCD, sổ đỏ. Trả JSON.',
+    prompt: `[VIEC:prompts] Chủ đề các Fanpage: ${tops.map((t) => `${t.page}: ${t.title}`).join('; ') || '-'}\n\nMẪU ĐÃ CÓ (không lặp lại): ${cut(names, 7000)}\n\nTỪ KHÓA THIẾT KẾ, HIỆU ỨNG nên khai thác: ${DESIGN_KEYWORDS}\n\nĐề xuất tối đa 3 mẫu. Trả JSON {"prompts":[{"name":"tên ngắn","kind":"image|video","text":"prompt hoàn chỉnh, có chỗ [NỘI DUNG] để thay","keywords":"từ khóa thiết kế, hiệu ứng","why":"dùng cho chủ đề nào, vì sao hiệu quả"}]}`,
+  });
+  const list = (parseJson(text)?.prompts || []).filter((x) => x?.name && x?.text && String(x.text).length > 60).slice(0, 3);
+  const all = await getSetting(env, 'prompt_suggestions', []);
+  const t = now();
+  for (const [i, x] of list.entries()) all.unshift({ sid: `${t}${i}`, name: cut(x.name, 90), kind: x.kind === 'video' ? 'video' : 'image', text: String(x.text).slice(0, 2500), keywords: cut(x.keywords, 200), why: cut(x.why, 300), status: 'pending', at: t });
+  await putSetting(env, 'prompt_suggestions', all.slice(0, 40));
+  await putSetting(env, 'prompt_suggest_at', t);
+  log.push(`Đề xuất ${list.length} prompt mới cho Thư viện, chờ duyệt`);
+  return log;
+}
+
 // ---------- Chạy hằng ngày ----------
 const SYS_REQ = { headers: new Headers() };
 export async function runDaily(env, { pageIds = null, steps = ['learn', 'plan', 'drafts', 'suggest'], force = false, userId = null } = {}) {
@@ -400,6 +436,10 @@ export async function runDaily(env, { pageIds = null, steps = ['learn', 'plan', 
         if (force || pend.n < 6) await suggestTopics(env, page, log); else log.push(`${page.name}: còn ${pend.n} đề xuất chưa duyệt, tạm chưa đề xuất thêm`);
       }
     } catch (e) { log.push(`${page.name}: lỗi ${cut(e.message, 160)}`); }
+  }
+  // Thứ Hai: đề xuất prompt mới cho Thư viện (1 lần, một lượt Claude Haiku)
+  if (!pageIds && steps.includes('suggest') && new Date(`${today}T00:00:00Z`).getUTCDay() === 1) {
+    try { await suggestPrompts(env, log); } catch (e) { log.push(`Đề xuất prompt lỗi: ${cut(e.message, 120)}`); }
   }
   settings.last_run = t;
   settings.last_log = log.slice(0, 30);
@@ -450,8 +490,10 @@ export async function assistantState(request, env, user) {
   let engagement = null;
   try { engagement = await pageEngagement(env, pid); } catch (e) { engagement = { error: e.message, windows: [], topics: [], top: [], low: [] }; }
   if (engagement) delete engagement.text;
+  const promptSugg = (await getSetting(env, 'prompt_suggestions', [])).filter((x) => x.status === 'pending');
+  const promptExtra = await getSetting(env, 'prompt_extra', []);
   return json({
-    engagement,
+    engagement, prompt_suggestions: promptSugg, prompt_extra: promptExtra,
     page, pages: pages.map((p) => ({ ...p, cfg: pageCfg(settings, p.id, p.subs > 0) })),
     cfg: pageCfg(settings, pid, page.subs > 0), today, tomorrow,
     plans: [plan, planNext].filter(Boolean),
@@ -566,3 +608,32 @@ export async function saveModels(request, env, user) {
   await audit(env, request, user.id, 'ai_models_updated', `${b.write} / ${b.fast}`);
   return json({ models: { write: b.write, fast: b.fast } });
 }
+
+// POST /api/assistant/prompts/suggest: đề xuất prompt mới ngay
+export async function suggestPromptsNow(request, env, user) {
+  requireRole(user, 'owner', 'manager');
+  if (!aiProvider(env)) throw new HttpError(503, 'Chưa cài AI cho hệ thống', 'no_ai');
+  const log = await suggestPrompts(env, []);
+  return json({ log });
+}
+
+// POST /api/assistant/prompts/:sid/accept | dismiss: duyệt prompt đề xuất (chấp nhận thì thêm vào Prompt bổ sung, mã bs-NN)
+async function decidePrompt(request, env, user, sid, accept) {
+  requireRole(user, 'owner', 'manager');
+  const all = await getSetting(env, 'prompt_suggestions', []);
+  const x = all.find((p) => p.sid === String(sid));
+  if (!x || x.status !== 'pending') throw new HttpError(404, 'Không tìm thấy đề xuất', 'not_found');
+  x.status = accept ? 'accepted' : 'dismissed';
+  if (accept) {
+    const extra = await getSetting(env, 'prompt_extra', []);
+    const n = extra.reduce((m, p) => Math.max(m, Number(String(p.id).split('-')[1]) || 0), 0) + 1;
+    x.id = `bs-${String(n).padStart(2, '0')}`;
+    extra.push({ id: x.id, name: x.name, kind: x.kind, text: x.text, keywords: x.keywords, why: x.why, at: now() });
+    await putSetting(env, 'prompt_extra', extra, user.id);
+  }
+  await putSetting(env, 'prompt_suggestions', all, user.id);
+  await audit(env, request, user.id, accept ? 'prompt_accepted' : 'prompt_dismissed', x.name);
+  return json({ ok: true, id: x.id || null });
+}
+export const acceptPrompt = (r, e, u, sid) => decidePrompt(r, e, u, sid, true);
+export const dismissPrompt = (r, e, u, sid) => decidePrompt(r, e, u, sid, false);
