@@ -34,11 +34,29 @@ export function ruleLimits(rules) {
 // Dòng gạch đầu dòng liền nhau giữ nguyên trong một khối.
 export const PARA_MAX = 200;
 const BULLET = /^\s*(?:[-•*+]|\d+[.)]|\p{Extended_Pictographic})/u;
+// Dòng hoặc câu chỉ có biểu tượng (ví dụ "🔎" đứng riêng) không gắn với ý nào: gắn vào đầu dòng kế tiếp, hết dòng thì gắn cuối dòng trước.
+const EMO_ONLY = /^[\p{Extended_Pictographic}\uFE0F\u200D\s.,!?…:;-]+$/u;
+export function attachLoneEmoji(lines) {
+  const out = []; let carry = '';
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (EMO_ONLY.test(line)) { const e = (line.match(EMOJI) || []).slice(0, 1).join(''); if (e && !carry) carry = e; continue; }
+    if (carry) { out.push(/^\p{Extended_Pictographic}/u.test(line) ? line : `${carry} ${line}`); carry = ''; } else out.push(line);
+  }
+  if (carry && out.length && !/\p{Extended_Pictographic}\uFE0F?$/u.test(out[out.length - 1])) out[out.length - 1] += ` ${carry}`;
+  return out;
+}
+const mergeEmojiSentences = (arr) => {
+  const out = [];
+  for (const sen of arr) { if (EMO_ONLY.test(sen) && out.length) out[out.length - 1] += ` ${sen.trim()}`; else out.push(sen); }
+  return out;
+};
 export function shortParagraphs(text) {
   const blocks = [];
-  for (const line of String(text || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
+  for (const line of attachLoneEmoji(String(text || '').split('\n'))) {
     if (BULLET.test(line) && line.length <= PARA_MAX && blocks.length && blocks[blocks.length - 1].bullet) { blocks[blocks.length - 1].lines.push(line); continue; }
-    const sentences = line.split(/(?<=[.!?…])\s+/);
+    const sentences = mergeEmojiSentences(line.split(/(?<=[.!?…])\s+/));
     if (line.length <= PARA_MAX && sentences.length <= 2) { blocks.push({ lines: [line], bullet: BULLET.test(line) }); continue; }
     let cur = [];
     for (const sen of sentences) {
@@ -175,7 +193,7 @@ export async function aiAdapt(request, env, user) {
 export function systemPrompt(rules, pageNames, style = {}) {
   const lim = ruleLimits(rules);
   const emo = lim.maxEmoji !== null
-    ? `Dùng ${lim.minEmoji ? `${lim.minEmoji} đến ` : 'tối đa '}${lim.maxEmoji} biểu tượng cảm xúc phù hợp chủ đề (ví dụ 🌱 🌿 🍈 ☕ ✅ 📌 📲 👉) cho bài sinh động: đặt ở đầu câu mở đầu, trước ý chính hoặc lời kêu gọi; không đặt hai biểu tượng liền nhau, không rải mỗi câu một biểu tượng.`
+    ? `Dùng ${lim.minEmoji ? `${lim.minEmoji} đến ` : 'tối đa '}${lim.maxEmoji} biểu tượng cảm xúc phù hợp chủ đề (ví dụ 🌱 🌿 🍈 ☕ ✅ 📌 📲 👉) cho bài sinh động: mỗi biểu tượng gắn với một ý, đặt ở đầu câu mở đầu, trước ý chính hoặc lời kêu gọi; không để biểu tượng đứng riêng một dòng, không đặt hai biểu tượng liền nhau, không rải mỗi câu một biểu tượng.`
     : 'Có thể dùng vài biểu tượng cảm xúc phù hợp cho sinh động, không lạm dụng.';
   const para = 'Đoạn văn ngắn: mỗi đoạn tối đa 2 câu (không quá 3 dòng trên điện thoại), các đoạn cách nhau một dòng trống; không viết đoạn dài.';
   let tail;
