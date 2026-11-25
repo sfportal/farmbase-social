@@ -20,7 +20,7 @@ Tagline: "Dữ liệu vườn trồng, minh bạch từ gốc" (ngắn: "Minh b�
 Đối tượng: bà con trồng sầu riêng, cà phê; HTX, tổ hợp tác; doanh nghiệp thu mua, cơ sở đóng gói; cán bộ xã.
 Giọng văn: rõ ràng, gần gũi với bà con, chuyên nghiệp với doanh nghiệp. Mở bằng nỗi đau cụ thể (người mua hỏi nguồn gốc, thiếu nhật ký, hồ sơ rời rạc, thị trường đòi truy xuất).
 TRỌNG TÂM: truy xuất nguồn gốc (khoảng 40% bài). Mã số vùng trồng chỉ là nội dung phụ (khoảng 15%), không lấy làm chủ đề chính.
-BẮT BUỘC: ${CAP_MA} Đồng bộ hệ thống truy xuất quốc gia chỉ áp dụng cho vùng đã có mã. GS1 và module cơ sở đóng gói ghi "dự kiến 11/2026". Không dùng tên DurianBase. Không viết "100% nông hộ vùng 07". Không dùng "số 1", "duy nhất", "hàng đầu". Không quảng bá tính năng không có (AI chẩn đoán bệnh, dự báo năng suất, sàn mua bán). Không công khai tên, số điện thoại của bà con. Không nêu số nông hộ, diện tích, số vùng trồng FarmBase đã triển khai, trừ khi người duyệt yêu cầu. Hạn chế nhắc dữ liệu cá nhân (CCCD, sổ đỏ, giấy tờ đất). Tránh nội dung pháp lý như ủy quyền, tranh chấp đất, thủ tục pháp lý về mã số vùng trồng.
+BẮT BUỘC: ${CAP_MA} Đồng bộ hệ thống truy xuất quốc gia chỉ áp dụng cho vùng đã có mã. Kết nối GS1 Việt Nam đã hoàn thành từ 20/11/2026. Module cơ sở đóng gói ghi "dự kiến 11/2026". Không dùng tên DurianBase. Không viết "100% nông hộ vùng 07". Không dùng "số 1", "duy nhất", "hàng đầu". Không quảng bá tính năng không có (AI chẩn đoán bệnh, dự báo năng suất, sàn mua bán). Không công khai tên, số điện thoại của bà con. Không nêu số nông hộ, diện tích, số vùng trồng FarmBase đã triển khai, trừ khi người duyệt yêu cầu. Hạn chế nhắc dữ liệu cá nhân (CCCD, sổ đỏ, giấy tờ đất). Tránh nội dung pháp lý như ủy quyền, tranh chấp đất, thủ tục pháp lý về mã số vùng trồng.
 Số liệu triển khai (CHỈ dùng khi người duyệt yêu cầu): trên 1.500 nông hộ, khoảng 1.600 ha, 66 vùng trồng tại Đắk Lắk (số liệu 28/10/2026).
 Liên hệ: Hotline BVI 0944 374 068 · info@bvi.vn · https://farmbase.vn`;
 
@@ -210,7 +210,7 @@ export const TEMPLATES = {
             hook: 'Doanh nghiệp thu mua cần biết hàng đến từ vùng nào, lô nào.\nVùng nguyên liệu có dữ liệu thì dễ chứng minh với khách hàng.',
             message: 'FarmBase gom vùng trồng, lô, nhật ký, thu hoạch và QR vào một nơi để doanh nghiệp chủ động chứng minh nguồn gốc.',
             cta: 'Nhắn tin để hẹn xem demo',
-            facts: 'Vùng trồng, lô đất, bản đồ lô, nhật ký, thu hoạch trên trang quản lý\nQR vùng trồng và QR từng lô\nGS1 và module cơ sở đóng gói: dự kiến 11/2026\nGiải pháp FarmBase do BVI và Salefronts đồng phát triển',
+            facts: 'Vùng trồng, lô đất, bản đồ lô, nhật ký, thu hoạch trên trang quản lý\nQR vùng trồng và QR từng lô\nKết nối GS1 Việt Nam: đã hoàn thành từ 20/11/2026\nModule cơ sở đóng gói: dự kiến 11/2026\nGiải pháp FarmBase do BVI và Salefronts đồng phát triển',
             ideas: 'Video demo 45 giây cho doanh nghiệp\nBài "3 câu khách nhập khẩu hay hỏi và dữ liệu trả lời"',
             formats: 'Video 45 giây, ảnh 16:9', visual: 'Mockup trang quản lý vùng nguyên liệu, dữ liệu mẫu',
             prompt_ids: 'fb-04,vt-04,tx-08', storyboard_id: 'demo-khach', ads: 'Mục tiêu: Khách hàng tiềm năng; tệp doanh nghiệp xuất khẩu nông sản, cơ sở đóng gói.',
@@ -282,7 +282,7 @@ export const TEMPLATES = {
             hook: 'Muốn có trang truy xuất cho vùng nguyên liệu nhưng chưa có người làm dữ liệu?',
             message: 'BVI vận hành dữ liệu vùng trồng và truy xuất trên FarmBase, hỗ trợ thêm hồ sơ mã số vùng trồng khi HTX cần.',
             cta: 'Gọi Hotline BVI 0944 374 068 để được khảo sát',
-            facts: 'Dịch vụ: mã số vùng trồng; hỗ trợ mã cơ sở đóng gói; truy xuất nguồn gốc và vận hành dữ liệu; liên kết kỹ thuật canh tác; kết nối thu mua\nGS1 và module cơ sở đóng gói: dự kiến 11/2026\nGiá chỉ ghi "từ …" theo báo giá hiện hành, "chưa VAT, liên hệ để khảo sát"; không đăng giá khuyến mại\nGiải pháp FarmBase do BVI và Salefronts đồng phát triển',
+            facts: 'Dịch vụ: mã số vùng trồng; hỗ trợ mã cơ sở đóng gói; truy xuất nguồn gốc và vận hành dữ liệu; liên kết kỹ thuật canh tác; kết nối thu mua\nKết nối GS1 Việt Nam: đã hoàn thành từ 20/11/2026\nModule cơ sở đóng gói: dự kiến 11/2026\nGiá chỉ ghi "từ …" theo báo giá hiện hành, "chưa VAT, liên hệ để khảo sát"; không đăng giá khuyến mại\nGiải pháp FarmBase do BVI và Salefronts đồng phát triển',
             ideas: 'Bài dịch vụ cho HTX\nBài dịch vụ cho doanh nghiệp thu mua\nVideo proposal 45 giây',
             formats: 'Ảnh 1:1, video 45 giây', visual: 'Ảnh vùng nguyên liệu và giao diện FarmBase',
             prompt_ids: 'ha-01,vt-05,tx-08', storyboard_id: 'proposal-khach', ads: 'Mục tiêu: Khách hàng tiềm năng; tệp doanh nghiệp xuất khẩu nông sản, cơ sở đóng gói.',
