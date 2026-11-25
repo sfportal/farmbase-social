@@ -49,6 +49,8 @@ assert.equal(enforceStyle('Gọi 0911 111 222 nhé.', { rules: 'Liên hệ 0911 
 assert.equal(enforceStyle('Tin mới 🌱🌱🔥. Ý một ✅. Ý hai 📌. Kêu gọi 👉', { rules: '2 đến 3 biểu tượng mỗi bài' }), 'Tin mới 🌱. Ý một ✅.\n\nÝ hai 📌. Kêu gọi', 'gộp biểu tượng liền nhau, tối đa 3');
 assert.equal(enforceStyle('Chào bà con.', { rules: '2 đến 3 biểu tượng mỗi bài' }), '🌱 Chào bà con.', 'thiếu biểu tượng thì thêm ở câu mở đầu');
 const { shortParagraphs } = await import('../src/routes/writing.js');
+assert.equal(shortParagraphs('Đối tác hỏi: lô này từ vườn nào? Quý khách trả lời trong bao lâu? 🔎\n\nVới nhiều doanh nghiệp.'), 'Đối tác hỏi: lô này từ vườn nào? Quý khách trả lời trong bao lâu? 🔎\n\nVới nhiều doanh nghiệp.', 'biểu tượng cuối câu không bị tách thành đoạn riêng');
+assert.equal(shortParagraphs('Mở đầu?\n\n🔎\n\nVới nhiều doanh nghiệp.\n\nKết.\n\n📩'), 'Mở đầu?\n\n🔎 Với nhiều doanh nghiệp.\n\nKết. 📩', 'dòng chỉ có biểu tượng được gắn vào câu');
 const longP = 'Câu một khá dài về kỹ thuật chăm sóc vườn sầu riêng sau thu hoạch cho bà con. Câu hai nói về lịch bón phân hợp lý trong mùa mưa. Câu ba mời bà con đăng ký tham gia buổi tập huấn sắp tới.';
 assert.equal(shortParagraphs(longP), 'Câu một khá dài về kỹ thuật chăm sóc vườn sầu riêng sau thu hoạch cho bà con. Câu hai nói về lịch bón phân hợp lý trong mùa mưa.\n\nCâu ba mời bà con đăng ký tham gia buổi tập huấn sắp tới.');
 assert.equal(shortParagraphs('Mở đầu.\n- Ý một\n- Ý hai\nKết.'), 'Mở đầu.\n\n- Ý một\n- Ý hai\n\nKết.');
